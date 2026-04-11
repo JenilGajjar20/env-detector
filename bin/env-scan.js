@@ -10,38 +10,75 @@ const envPath = path.join(cwd, ".env");
 
 const args = process.argv.slice(2);
 
-const askMode = args.includes("--ask");
-const compareMode = args.includes("--compare");
-const checkMode = args.includes("--check");
-const fixMode = args.includes("--fix");
-const securityMode = args.includes("--security");
-const strictMode = args.includes("--strict");
-const versionMode = args.includes("--version") || args.includes("--v")
+const askMode = args.includes("--ask") || args.includes("-a");
+const compareMode = args.includes("--compare") || args.includes("-c");
+const checkMode = args.includes("--check") || args.includes("-k");
+const fixMode = args.includes("--fix") || args.includes("-f");
+const securityMode = args.includes("--security") || args.includes("-s");
+const strictMode = args.includes("--strict") || args.includes("-t");
+const versionMode = args.includes("--version") || args.includes("-v")
 const helpMode = args.includes("--help") || args.includes("-h");
 
-let result = scanProject(cwd);
+const validFlags = [
+  "--ask", "-a",
+  "--compare", "-c",
+  "--check", "-k",
+  "--fix", "-f",
+  "--security", "-s",
+  "--strict", "-t",
+  "--version", "-v",
+  "--help", "-h"
+];
 
-if (helpMode) {
+const unknownFlag = args.find(arg => arg.startsWith("-") && !validFlags.includes(arg));
+
+if (unknownFlag && !helpMode) {
+  console.log(`\nError: Unknown flag "${unknownFlag}"`);
+}
+
+if (helpMode || (unknownFlag && !helpMode)) {
   console.log(`
 Usage: env-detector [options]
 
 Options:
-  --ask        Interactive mode to fill missing or empty values
-  --compare    Show detailed comparison of used, missing, empty, and unused variables
-  --check      Exit with error if variables are missing or empty
-  --fix        Remove unused variables from .env
-  --security   Scan for hardcoded secrets in source files and .env
-  --strict     Fail if any issues (missing, empty, or unused) are found
-  --version    Show version information
-  --help, -h   Show this help message
+  -a, --ask        Interactive mode to fill missing or empty values
+  -c, --compare    Show detailed comparison of used, missing, empty, and unused variables
+  -k, --check      Exit with error if variables are missing or empty
+  -f, --fix        Remove unused variables from .env
+  -s, --security   Scan for hardcoded secrets in source files and .env
+  -t, --strict     Fail if any issues (missing, empty, or unused) are found
+  -v, --version    Show version information
+  -h, --help       Show this help message
   `);
-  process.exit(0);
+  process.exit(unknownFlag ? 1 : 0);
 }
 
 if (versionMode) {
   const pkg = require("../package.json");
   console.log(`env-detector v${pkg.version}`);
   process.exit(0);
+}
+
+let result = scanProject(cwd);
+
+// interactive fix
+const varsToDelete = new Set();
+
+if (fixMode && result.unused.length) {
+  console.log("\nReview unused variables:");
+  result.unused.forEach(key => {
+    if (readline.keyInYN(`Delete unused variable "${key}"?`)) {
+      varsToDelete.add(key);
+    }
+  });
+  console.log("");
+
+  // update result to reflect choices
+  const originalUnused = [...result.unused];
+  result.unused = originalUnused.filter(k => varsToDelete.has(k));
+  // if we chose NOT to delete it, it's effectively "used" for this run's purposes
+  const kept = originalUnused.filter(k => !varsToDelete.has(k));
+  result.used.push(...kept);
 }
 
 // security
@@ -96,6 +133,37 @@ if (checkMode) {
   }
 
   console.log("✔ ENV check passed\n");
+  process.exit(0);
+}
+
+
+if (strictMode) {
+  let failed = false;
+
+  if (result.missing.length) {
+    failed = true;
+    console.log("\nMissing variables:");
+    result.missing.forEach(v => console.log(`  - ${v}`));
+  }
+
+  if (result.empty.length) {
+    failed = true;
+    console.log("\nEmpty variables:");
+    result.empty.forEach(v => console.log(`  - ${v}`));
+  }
+
+  if (result.unused.length) {
+    failed = true;
+    console.log("\nUnused variables:");
+    result.unused.forEach(v => console.log(`  - ${v}`));
+  }
+
+  if (failed) {
+    console.log("\n✖ strict mode failed\n");
+    process.exit(1);
+  }
+
+  console.log("✔ strict mode passed\n");
   process.exit(0);
 }
 
@@ -157,6 +225,8 @@ let content = fs.existsSync(envPath)
 const envMap = {};
 
 content.split("\n").forEach(line => {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith("#")) return;
   const [k, ...rest] = line.split("=");
   if (!k) return;
   envMap[k.trim()] = rest.join("=");
@@ -195,7 +265,7 @@ result.missing.forEach(key => {
 
 // fix unused
 if (fixMode) {
-  result.unused.forEach(key => delete envMap[key]);
+  varsToDelete.forEach(key => delete envMap[key]);
 }
 
 
@@ -204,22 +274,6 @@ const newContent = Object.entries(envMap)
   .join("\n");
 
 fs.writeFileSync(envPath, newContent + "\n");
-
-
-// strict
-if (strictMode) {
-  if (
-    result.missing.length ||
-    result.empty.length ||
-    result.unused.length
-  ) {
-    console.log("✖ strict mode failed\n");
-    process.exit(1);
-  }
-
-  console.log("✔ strict mode passed\n");
-  process.exit(0);
-}
 
 
 console.log("✔ env scan complete\n");
