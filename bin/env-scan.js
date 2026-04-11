@@ -90,9 +90,11 @@ if (securityMode) {
     process.exit(0);
   }
 
-  console.log("\nSecurity issues:\n");
-  issues.forEach(i => console.log(" -", i.file));
-  console.log("");
+  console.log("\nSecurity issues found:\n");
+  issues.forEach(i => {
+    console.log(` - ${i.file}:${i.line}`);
+    console.log(`   ${i.snippet}\n`);
+  });
 
   process.exit(0);
 }

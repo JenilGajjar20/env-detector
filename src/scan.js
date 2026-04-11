@@ -215,14 +215,20 @@ function scanSecurity(rootDir) {
   const issues = [];
 
   const regex =
-    /(password|secret|token|apikey|key)\s*[:=]\s*['"][^'"]+['"]/gi;
+    /(?<![a-zA-Z0-9])(password|secret|token|apikey|key)\b\s*[:=]\s*['"](?!(string|varchar|text|number|boolean|uuid|auto_increment|primary_key|null|undefined|true|false|name|id|type|label|department|category|field|header|consumption|duration)['"])[^'"]{8,}['"]/gi;
 
   function scan(dir) {
     const files = fs.readdirSync(dir);
 
     for (const file of files) {
 
-      if (file === "node_modules" || file === ".git") continue;
+      if (
+        file === "node_modules" ||
+        file === ".git" ||
+        file === "dist" ||
+        file === "build" ||
+        file.startsWith(".")
+      ) continue;
 
       const full = path.join(dir, file);
       const stat = fs.statSync(full);
@@ -232,9 +238,34 @@ function scanSecurity(rootDir) {
       } else if (/\.(js|ts|env)$/.test(file)) {
         const content = fs.readFileSync(full, "utf8");
 
-        if (regex.test(content)) {
-          issues.push({ file: full });
-        }
+        const lines = content.split("\n");
+        lines.forEach((line, index) => {
+          regex.lastIndex = 0;
+          const match = regex.exec(line);
+          if (match) {
+            const matchedWord = match[1].toLowerCase();
+            const fullMatch = match[0];
+            const valMatch = fullMatch.match(/['"](.*?)['"]/);
+            if (!valMatch) return;
+
+            const value = valMatch[1];
+
+            // Ignore paths/URLs
+            if (value.startsWith("/")) return;
+
+            // Stricter check for generic "key" property
+            if (matchedWord === "key") {
+              const hasComplexity = /[0-9!@#$%^&*()+\-=\[\]{};':"\\|,.<>\/?]/.test(value);
+              if (!hasComplexity) return;
+            }
+
+            issues.push({
+              file: full,
+              line: index + 1,
+              snippet: line.trim()
+            });
+          }
+        });
       }
     }
   }
