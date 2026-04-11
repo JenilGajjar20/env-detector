@@ -1,0 +1,26 @@
+{
+  "name": "env-detector",
+  "version": "1.0.5",
+  "description": "Smart .env generator and auditor",
+  "main": "src/scan.js",
+  "bin": {
+    "env-detector": "./bin/env-scan.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "env",
+    "dotenv",
+    "environment",
+    "env-scan",
+    "env-detector"
+  ],
+  "author": "Jenil Gajjar",
+  "license": "MIT",
+  "dependencies": {
+    "@babel/parser": "^7.29.2",
+    "@babel/traverse": "^7.29.0",
+    "readline-sync": "^1.4.10"
+  }
+}
