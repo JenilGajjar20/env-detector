@@ -1,6 +1,6 @@
 {
   "name": "env-detector",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "description": "Smart .env generator and auditor",
   "main": "src/scan.js",
   "bin": {
