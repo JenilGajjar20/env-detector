@@ -17,8 +17,26 @@ const fixMode = args.includes("--fix");
 const securityMode = args.includes("--security");
 const strictMode = args.includes("--strict");
 const versionMode = args.includes("--version") || args.includes("--v")
+const helpMode = args.includes("--help") || args.includes("-h");
 
 let result = scanProject(cwd);
+
+if (helpMode) {
+  console.log(`
+Usage: env-detector [options]
+
+Options:
+  --ask        Interactive mode to fill missing or empty values
+  --compare    Show detailed comparison of used, missing, empty, and unused variables
+  --check      Exit with error if variables are missing or empty
+  --fix        Remove unused variables from .env
+  --security   Scan for hardcoded secrets in source files and .env
+  --strict     Fail if any issues (missing, empty, or unused) are found
+  --version    Show version information
+  --help, -h   Show this help message
+  `);
+  process.exit(0);
+}
 
 if (versionMode) {
   const pkg = require("../package.json");
@@ -88,7 +106,6 @@ if (!fs.existsSync(envPath)) {
 }
 
 
-// grouped generation
 // grouped generation
 if (Object.keys(result.grouped).length && !askMode) {
 
