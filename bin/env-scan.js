@@ -79,6 +79,24 @@ if (fixMode && result.unused.length) {
   // if we chose NOT to delete it, it's effectively "used" for this run's purposes
   const kept = originalUnused.filter(k => !varsToDelete.has(k));
   result.used.push(...kept);
+
+  // In-place fix to preserve formatting
+  if (varsToDelete.size > 0 && fs.existsSync(envPath)) {
+    const content = fs.readFileSync(envPath, "utf8");
+    const lines = content.split("\n");
+    const newContent = lines.filter(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return true;
+      const [key] = trimmed.split("=");
+      return !varsToDelete.has(key.trim());
+    }).join("\n");
+    
+    fs.writeFileSync(envPath, newContent);
+    console.log(`✔ Removed ${varsToDelete.size} unused variables while preserving file structure.\n`);
+    process.exit(0);
+  }
+} else if (fixMode) {
+  console.log("✔ No unused variables found\n");
 }
 
 // security
