@@ -4,7 +4,7 @@
   "description": "Smart .env generator and auditor",
   "main": "src/scan.js",
   "bin": {
-    "env-detector": "./bin/env-scan.js"
+    "env-detector": "bin/env-scan.js"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
