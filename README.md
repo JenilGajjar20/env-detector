@@ -1,81 +1,172 @@
 # env-detector
 
-Smart environment variable analyzer and `.env` generator.
+Smart environment variable analyzer and `.env` generator for Node.js projects.
 
-Automatically detects `process.env` usage, generates `.env`, groups environments, detects missing variables, and audits configuration.
+`env-detector` scans JavaScript and TypeScript source files for `process.env` usage, compares those variables with `.env`, and helps you generate, audit, or clean environment configuration safely.
 
+## Installation
+
+Run without installing:
+
+```bash
 npx env-detector
 ```
 
----
+Install globally:
 
-## Usage
+```bash
+npm install -g env-detector
+```
+
+Then run inside any project:
 
 ```bash
 env-detector
 ```
 
----
+## Default Behavior
+
+```bash
+env-detector
+```
+
+The default command scans the current project and appends missing environment variables to `.env`.
+
+If no `process.env` variables are detected, it does not create an empty `.env` file.
+
+Example source:
+
+```js
+process.env.DB_HOST;
+process.env.PORT || 3000;
+```
+
+Generated `.env`:
+
+```env
+DB_HOST=
+PORT=3000
+```
+
+Existing `.env` formatting is preserved as much as possible. Missing variables are appended instead of rebuilding the entire file.
 
 ## Commands
 
+### Read-Only Commands
+
+These commands inspect the project but do not create or modify `.env`.
+
 | Command | Shorthand | Description |
-|---------|-----------|-------------|
-| `env-detector` | | Generate `.env` |
-| `env-detector --ask` | `-a` | Interactive mode to fill missing or empty values |
-| `env-detector --compare` | `-c` | Show detailed comparison of used, missing, empty, and unused variables |
-| `env-detector --check` | `-k` | Exit with error if variables are missing or empty |
-| `env-detector --fix` | `-f` | **Interactive** cleanup of unused variables |
+| --- | --- | --- |
+| `env-detector --compare` | `-c` | Show used, missing, empty, and unused variables |
+| `env-detector --check` | `-k` | Fail if variables are missing or empty |
+| `env-detector --strict` | `-t` | Fail if variables are missing, empty, or unused |
 | `env-detector --security` | `-s` | Scan for hardcoded secrets in source files and `.env` |
-| `env-detector --strict` | `-t` | Strict mode (CI) with detailed failure reporting |
-| `env-detector --help` | `-h` | Show help message |
+| `env-detector --help` | `-h` | Show help |
 | `env-detector --version` | `-v` | Show version |
 
----
+### Write Commands
 
-## Features
+These commands can update `.env`.
 
-### 🛠 Interactive Fix
-When running with `--fix` or `-f`, the tool doesn't just delete variables. It lists every unused key it finds and asks for your confirmation (`y/n`) before removing it.
+| Command | Shorthand | Description |
+| --- | --- | --- |
+| `env-detector` | | Append missing variables to `.env` |
+| `env-detector --ask` | `-a` | Prompt for missing or empty values |
+| `env-detector --fix` | `-f` | Interactively remove unused variables from `.env` |
 
-### 🔍 Detailed Strict Mode
-Ideal for CI/CD pipelines. If `strict` mode fails, it will provide a categorized list of exactly what triggered the failure:
-- **Missing**: Variables used in code but not in `.env`.
-- **Empty**: Variables in `.env` without values.
-- **Unused**: Variables in `.env` not found in code.
+## Flag Details
 
----
+### `--compare`
 
-## Example
+Prints a categorized report:
 
-**Code:**
+- used variables
+- missing variables
+- empty variables
+- unused variables
+- detected defaults
+- source locations when available
 
-```javascript
-process.env.DB_HOST
-process.env.PORT
-```
+This command is intended for human inspection and exits successfully.
 
-**Generated `.env`:**
+### `--check`
 
-```
-DB_HOST=
-PORT=
-```
+Useful for CI pipelines.
 
----
+Fails when:
+
+- a variable is used in code but missing from `.env`
+- a variable exists in `.env` but has no value
+
+Unused variables are not treated as failures in `--check`.
+
+### `--strict`
+
+The strongest validation mode.
+
+Fails when:
+
+- variables are missing
+- variables are empty
+- variables are unused
+
+This is best suited for `.env.example` style files or tightly controlled projects.
+
+### `--ask`
+
+Prompts for missing or empty variables and updates `.env`.
+
+Likely secret values such as `PASSWORD`, `SECRET`, `TOKEN`, `API_KEY`, and `JWT_SECRET` are entered with hidden input.
+
+### `--fix`
+
+Lists unused variables and asks for confirmation before removing each one.
+
+This command preserves comments and unrelated lines while removing selected variables.
+
+### `--security`
+
+Scans source files and `.env` for hardcoded secret-looking values.
+
+It is read-only by default and reports potential issues with file and line numbers.
 
 ## Grouped Config Support
 
-If config file contains:
+If a config file contains grouped environment sections:
 
-```javascript
-development: {
-  username: process.env.DBUSERNAME
-}
+```js
+module.exports = {
+  development: {
+    username: process.env.DB_USERNAME,
+    password: process.env.DB_PASSWORD
+  },
+  production: {
+    username: process.env.DB_USERNAME,
+    password: process.env.DB_PASSWORD
+  }
+};
 ```
 
-Generated:
+Missing variables are appended under detected group headers when possible:
 
-```
+```env
 # development
-DBUSERNAME=
+DB_USERNAME=
+DB_PASSWORD=
+```
+
+## Exit Codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Command completed successfully |
+| `1` | Validation failed |
+| `2` | Scanner or internal error |
+
+## Notes
+
+- The scanner skips `node_modules`, `.git`, `dist`, `build`, and dot-prefixed files/folders during source scanning.
+- `.env` is parsed separately for variable comparison.
+- `--security` includes `.env` in its scan.
+- The tool currently detects direct `process.env.KEY`, bracket access, destructuring from `process.env`, and simple fallback defaults such as `process.env.PORT || 3000`.

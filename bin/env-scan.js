@@ -1,23 +1,26 @@
 #!/usr/bin/env node
 
-const fs = require("fs");
 const path = require("path");
 const readline = require("readline-sync");
 const { scanProject, scanSecurity } = require("../src/scan");
+const {
+  appendMissingVars,
+  removeEnvVars,
+  updateEnvValues
+} = require("../src/writer");
 
 const cwd = process.cwd();
 const envPath = path.join(cwd, ".env");
-
 const args = process.argv.slice(2);
 
-const askMode = args.includes("--ask") || args.includes("-a");
-const compareMode = args.includes("--compare") || args.includes("-c");
-const checkMode = args.includes("--check") || args.includes("-k");
-const fixMode = args.includes("--fix") || args.includes("-f");
-const securityMode = args.includes("--security") || args.includes("-s");
-const strictMode = args.includes("--strict") || args.includes("-t");
-const versionMode = args.includes("--version") || args.includes("-v")
-const helpMode = args.includes("--help") || args.includes("-h");
+const askMode = hasFlag("--ask", "-a");
+const compareMode = hasFlag("--compare", "-c");
+const checkMode = hasFlag("--check", "-k");
+const fixMode = hasFlag("--fix", "-f");
+const securityMode = hasFlag("--security", "-s");
+const strictMode = hasFlag("--strict", "-t");
+const versionMode = hasFlag("--version", "-v");
+const helpMode = hasFlag("--help", "-h");
 
 const validFlags = [
   "--ask", "-a",
@@ -37,19 +40,7 @@ if (unknownFlag && !helpMode) {
 }
 
 if (helpMode || (unknownFlag && !helpMode)) {
-  console.log(`
-Usage: env-detector [options]
-
-Options:
-  -a, --ask        Interactive mode to fill missing or empty values
-  -c, --compare    Show detailed comparison of used, missing, empty, and unused variables
-  -k, --check      Exit with error if variables are missing or empty
-  -f, --fix        Remove unused variables from .env
-  -s, --security   Scan for hardcoded secrets in source files and .env
-  -t, --strict     Fail if any issues (missing, empty, or unused) are found
-  -v, --version    Show version information
-  -h, --help       Show this help message
-  `);
+  printHelp();
   process.exit(unknownFlag ? 1 : 0);
 }
 
@@ -59,241 +50,254 @@ if (versionMode) {
   process.exit(0);
 }
 
-let result = scanProject(cwd);
+let result;
 
-// interactive fix
-const varsToDelete = new Set();
-
-if (fixMode && result.unused.length) {
-  console.log("\nReview unused variables:");
-  result.unused.forEach(key => {
-    if (readline.keyInYN(`Delete unused variable "${key}"?`)) {
-      varsToDelete.add(key);
-    }
-  });
-  console.log("");
-
-  // update result to reflect choices
-  const originalUnused = [...result.unused];
-  result.unused = originalUnused.filter(k => varsToDelete.has(k));
-  // if we chose NOT to delete it, it's effectively "used" for this run's purposes
-  const kept = originalUnused.filter(k => !varsToDelete.has(k));
-  result.used.push(...kept);
-
-  // In-place fix to preserve formatting
-  if (varsToDelete.size > 0 && fs.existsSync(envPath)) {
-    const content = fs.readFileSync(envPath, "utf8");
-    const lines = content.split("\n");
-    const newContent = lines.filter(line => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) return true;
-      const [key] = trimmed.split("=");
-      return !varsToDelete.has(key.trim());
-    }).join("\n");
-    
-    fs.writeFileSync(envPath, newContent);
-    console.log(`✔ Removed ${varsToDelete.size} unused variables while preserving file structure.\n`);
-    process.exit(0);
-  }
-} else if (fixMode) {
-  console.log("✔ No unused variables found\n");
+try {
+  result = scanProject(cwd);
+} catch (err) {
+  console.error(`ERROR: Failed to scan project: ${err.message}`);
+  process.exit(2);
 }
 
-// security
 if (securityMode) {
   const issues = scanSecurity(cwd);
 
   if (!issues.length) {
-    console.log("✔ No security issues\n");
+    console.log("OK: No security issues found");
     process.exit(0);
   }
 
-  console.log("\nSecurity issues found:\n");
-  issues.forEach(i => {
-    console.log(` - ${i.file}:${i.line}`);
-    console.log(`   ${i.snippet}\n`);
+  console.log("\nSecurity issues found:");
+  issues.forEach(issue => {
+    console.log(`- ${path.relative(cwd, issue.file)}:${issue.line}`);
+    console.log(`  ${issue.snippet}`);
+    console.log("  Move this value to an environment variable when possible.");
   });
-
+  console.log(`\nSummary: ${issues.length} potential issue(s) found`);
   process.exit(0);
 }
 
-
-// compare
 if (compareMode) {
-
-  console.log("\nUsed:");
-  result.used.forEach(v => console.log(" -", v));
-
-  console.log("\nMissing:");
-  result.missing.forEach(v => console.log(" -", v));
-
-  console.log("\nEmpty:");
-  result.empty.forEach(v => console.log(" -", v));
-
-  console.log("\nUnused:");
-  result.unused.forEach(v => console.log(" -", v));
-
-  console.log("");
+  printCompare(result);
   process.exit(0);
 }
 
-
-// check
 if (checkMode) {
-
-  if (result.missing.length || result.empty.length) {
-
-    console.log("\nENV check failed");
-
-    result.missing.forEach(v => console.log("Missing:", v));
-    result.empty.forEach(v => console.log("Empty:", v));
-
-    console.log("");
-    process.exit(1);
-  }
-
-  console.log("✔ ENV check passed\n");
-  process.exit(0);
+  printCheck(result);
+  process.exit(result.missing.length || result.empty.length ? 1 : 0);
 }
-
 
 if (strictMode) {
-  let failed = false;
+  printStrict(result);
+  process.exit(result.missing.length || result.empty.length || result.unused.length ? 1 : 0);
+}
 
-  if (result.missing.length) {
-    failed = true;
-    console.log("\nMissing variables:");
-    result.missing.forEach(v => console.log(`  - ${v}`));
-  }
-
-  if (result.empty.length) {
-    failed = true;
-    console.log("\nEmpty variables:");
-    result.empty.forEach(v => console.log(`  - ${v}`));
-  }
-
-  if (result.unused.length) {
-    failed = true;
-    console.log("\nUnused variables:");
-    result.unused.forEach(v => console.log(`  - ${v}`));
-  }
-
-  if (failed) {
-    console.log("\n✖ strict mode failed\n");
-    process.exit(1);
-  }
-
-  console.log("✔ strict mode passed\n");
+if (fixMode) {
+  runFix(result);
   process.exit(0);
 }
 
-
-// create env
-if (!fs.existsSync(envPath)) {
-  fs.writeFileSync(envPath, "");
-}
-
-
-// grouped generation
-if (Object.keys(result.grouped).length && !askMode) {
-
-  let output = "";
-
-  const groupedKeys = new Set();
-
-  Object.values(result.grouped).forEach(keys => {
-    keys.forEach(k => groupedKeys.add(k));
-  });
-
-  const globalKeys = result.used.filter(k => !groupedKeys.has(k));
-
-  if (globalKeys.length) {
-    output += "# global\n";
-
-    globalKeys.forEach(key => {
-      const value = result.defaults?.[key] ?? "";
-      output += `${key}=${value}\n`;
-    });
-
-    output += "\n";
-  }
-
-  Object.entries(result.grouped).forEach(([env, keys]) => {
-
-    output += `# ${env}\n`;
-
-    keys.forEach(key => {
-      const value = result.defaults?.[key] ?? "";
-      output += `${key}=${value}\n`;
-    });
-
-    output += "\n";
-  });
-
-  fs.writeFileSync(envPath, output.trim() + "\n");
-
-  console.log("✔ Generated grouped env file\n");
+if (askMode) {
+  runAsk(result);
   process.exit(0);
 }
 
+if (!result.missing.length) {
+  console.log("OK: env scan complete");
+  if (!result.used.length) {
+    console.log("No environment variables detected in source files.");
+  }
+  console.log("No changes made.");
+  printSummary(result);
+  process.exit(0);
+}
 
-// parse env to map
-let content = fs.existsSync(envPath)
-  ? fs.readFileSync(envPath, "utf8")
-  : "";
+const writeResult = appendMissingVars(envPath, result.missing, result.defaults, result.grouped);
 
-const envMap = {};
+console.log("OK: env scan complete");
+console.log(`Used: ${result.used.length}`);
+console.log(`Added: ${writeResult.added.length}`);
+console.log(`Empty: ${result.empty.length}`);
+console.log(`Unused: ${result.unused.length}`);
 
-content.split("\n").forEach(line => {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith("#")) return;
-  const [k, ...rest] = line.split("=");
-  if (!k) return;
-  envMap[k.trim()] = rest.join("=");
-});
+if (writeResult.added.length) {
+  console.log(`Updated: ${path.relative(cwd, envPath)}`);
+}
 
+function runAsk(result) {
+  const askList = unique([...result.missing, ...result.empty]).sort();
 
-// ask mode
-const askList = [...new Set([...result.missing, ...result.empty])];
+  if (!askList.length) {
+    console.log("OK: No missing or empty variables found");
+    return;
+  }
 
-if (askMode && askList.length) {
+  const values = {};
 
   askList.forEach(key => {
-    const value = readline.question(`${key} = `);
-    envMap[key] = value;
+    const defaultHint = Object.prototype.hasOwnProperty.call(result.defaults, key)
+      ? ` (detected default: ${result.defaults[key]})`
+      : "";
+    const prompt = `${key}${defaultHint} = `;
+
+    values[key] = isLikelySecret(key)
+      ? readline.questionNewPassword(prompt, { mask: "*" })
+      : readline.question(prompt);
   });
 
-  const newContent = Object.entries(envMap)
-    .map(([k, v]) => `${k}=${v}`)
-    .join("\n");
+  const updateResult = updateEnvValues(envPath, values);
 
-  fs.writeFileSync(envPath, newContent + "\n");
-
-  console.log("✔ .env updated\n");
-  process.exit(0);
+  console.log("OK: .env updated");
+  console.log(`Added: ${updateResult.added.length}`);
+  console.log(`Updated: ${updateResult.updated.length}`);
 }
 
-
-// add missing
-result.missing.forEach(key => {
-  const value = result.defaults?.[key] ?? "";
-  if (!envMap[key]) {
-    envMap[key] = value;
+function runFix(result) {
+  if (!result.unused.length) {
+    console.log("OK: No unused variables found");
+    return;
   }
-});
 
+  console.log("\nUnused variables:");
+  sorted(result.unused).forEach(key => console.log(`- ${key}`));
+  console.log("");
 
-// fix unused
-if (fixMode) {
-  varsToDelete.forEach(key => delete envMap[key]);
+  const varsToDelete = new Set();
+
+  sorted(result.unused).forEach(key => {
+    if (readline.keyInYN(`Delete unused variable "${key}"?`)) {
+      varsToDelete.add(key);
+    }
+  });
+
+  if (!varsToDelete.size) {
+    console.log("OK: No changes made");
+    return;
+  }
+
+  const removeResult = removeEnvVars(envPath, varsToDelete);
+
+  console.log(`OK: Removed ${removeResult.removed.length} unused variable(s)`);
+  console.log(`Updated: ${path.relative(cwd, envPath)}`);
 }
 
+function printCompare(result) {
+  console.log("");
+  printCategory("Used", result.used, result);
+  printCategory("Missing", result.missing, result);
+  printCategory("Empty", result.empty, result);
+  printCategory("Unused", result.unused, result);
 
-const newContent = Object.entries(envMap)
-  .map(([k, v]) => `${k}=${v}`)
-  .join("\n");
+  if (result.parseErrors.length) {
+    console.log(`\nSkipped files: ${result.parseErrors.length}`);
+    result.parseErrors.forEach(err => console.log(`- ${err.file}: ${err.message}`));
+  }
 
-fs.writeFileSync(envPath, newContent + "\n");
+  console.log("\nSummary:");
+  printSummary(result);
+}
 
+function printCheck(result) {
+  if (!result.missing.length && !result.empty.length) {
+    console.log("OK: ENV check passed");
+    printSummary(result);
+    return;
+  }
 
-console.log("✔ env scan complete\n");
+  console.log("ERROR: ENV check failed");
+  printCategory("Missing", result.missing, result);
+  printCategory("Empty", result.empty, result);
+  console.log("\nUnused variables are reported by --compare and enforced by --strict.");
+}
+
+function printStrict(result) {
+  if (!result.missing.length && !result.empty.length && !result.unused.length) {
+    console.log("OK: strict mode passed");
+    printSummary(result);
+    return;
+  }
+
+  console.log("ERROR: strict mode failed");
+  printCategory("Missing", result.missing, result);
+  printCategory("Empty", result.empty, result);
+  printCategory("Unused", result.unused, result);
+  console.log("\nSummary:");
+  printSummary(result);
+}
+
+function printCategory(label, values, result) {
+  console.log(`\n${label} (${values.length}):`);
+
+  if (!values.length) {
+    console.log("  none");
+    return;
+  }
+
+  sorted(values).forEach(key => {
+    const defaultValue = Object.prototype.hasOwnProperty.call(result.defaults, key)
+      ? ` default=${result.defaults[key]}`
+      : "";
+    const locations = result.locations[key]?.length
+      ? ` (${formatLocations(result.locations[key])})`
+      : "";
+
+    console.log(`  - ${key}${defaultValue}${locations}`);
+  });
+}
+
+function printSummary(result) {
+  console.log(`Used: ${result.used.length}`);
+  console.log(`Missing: ${result.missing.length}`);
+  console.log(`Empty: ${result.empty.length}`);
+  console.log(`Unused: ${result.unused.length}`);
+}
+
+function formatLocations(locations) {
+  return locations
+    .slice(0, 3)
+    .map(location => location.line ? `${location.file}:${location.line}` : location.file)
+    .join(", ");
+}
+
+function isLikelySecret(key) {
+  return /(PASSWORD|SECRET|TOKEN|API_?KEY|JWT)/i.test(key);
+}
+
+function sorted(values) {
+  return [...values].sort((a, b) => a.localeCompare(b));
+}
+
+function unique(values) {
+  return Array.from(new Set(values));
+}
+
+function hasFlag(longFlag, shortFlag) {
+  return args.includes(longFlag) || args.includes(shortFlag);
+}
+
+function printHelp() {
+  console.log(`
+Usage: env-detector [options]
+
+Read-only options:
+  -c, --compare    Show used, missing, empty, and unused variables
+  -k, --check      Fail if variables are missing or empty
+  -s, --security   Scan for hardcoded secrets in source files and .env
+  -t, --strict     Fail if variables are missing, empty, or unused
+  -v, --version    Show version information
+  -h, --help       Show this help message
+
+Write options:
+  env-detector     Add missing variables to .env
+  -a, --ask        Prompt for missing or empty values
+  -f, --fix        Interactively remove unused variables from .env
+
+Examples:
+  env-detector --compare
+  env-detector --check
+  env-detector --strict
+  env-detector --ask
+  env-detector --fix
+  env-detector --security
+  `);
+}

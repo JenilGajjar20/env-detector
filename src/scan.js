@@ -2,11 +2,29 @@ const fs = require("fs");
 const path = require("path");
 const parser = require("@babel/parser");
 const traverse = require("@babel/traverse").default;
+const { parseEnv } = require("./writer");
 
 function scanProject(rootDir) {
   const usedEnvVars = new Set();
   const defaultValues = new Map();
   const groupedEnv = {};
+  const locations = {};
+  const parseErrors = [];
+
+  function recordUsage(key, filePath, node) {
+    if (!key) return;
+
+    usedEnvVars.add(key);
+
+    if (!locations[key]) {
+      locations[key] = [];
+    }
+
+    locations[key].push({
+      file: path.relative(rootDir, filePath),
+      line: node.loc?.start?.line || null
+    });
+  }
 
   function scanDir(dir) {
     const files = fs.readdirSync(dir);
@@ -61,7 +79,7 @@ function scanProject(rootDir) {
                     prop.value.property.value;
 
                   vars.add(key);
-                  usedEnvVars.add(key);
+                  recordUsage(key, fullPath, prop.value);
                 }
 
                 // process.env.KEY || value
@@ -78,7 +96,7 @@ function scanProject(rootDir) {
                       left.property.name || left.property.value;
 
                     vars.add(key);
-                    usedEnvVars.add(key);
+                    recordUsage(key, fullPath, left);
 
                     if (
                       right.type === "StringLiteral" ||
@@ -110,7 +128,7 @@ function scanProject(rootDir) {
                 const key =
                   node.property.name || node.property.value;
 
-                usedEnvVars.add(key);
+                recordUsage(key, fullPath, node);
               }
             },
 
@@ -125,7 +143,7 @@ function scanProject(rootDir) {
                 if (path.node.id.type === "ObjectPattern") {
                   path.node.id.properties.forEach(prop => {
                     if (prop.key?.name) {
-                      usedEnvVars.add(prop.key.name);
+                      recordUsage(prop.key.name, fullPath, prop);
                     }
                   });
                 }
@@ -145,7 +163,7 @@ function scanProject(rootDir) {
                 const key =
                   left.property.name || left.property.value;
 
-                usedEnvVars.add(key);
+                recordUsage(key, fullPath, left);
 
                 if (
                   right.type === "StringLiteral" ||
@@ -159,7 +177,12 @@ function scanProject(rootDir) {
 
           });
 
-        } catch (err) {}
+        } catch (err) {
+          parseErrors.push({
+            file: path.relative(rootDir, fullPath),
+            message: err.message
+          });
+        }
       }
     }
   }
@@ -173,19 +196,13 @@ function scanProject(rootDir) {
 
   if (fs.existsSync(envPath)) {
     const envContent = fs.readFileSync(envPath, "utf8");
+    const parsed = parseEnv(envContent);
 
-    envContent.split("\n").forEach(line => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) return;
+    parsed.vars.forEach((entry, key) => {
+      envFileVars.add(key);
 
-      const [key, value] = trimmed.split("=");
-
-      if (key) {
-        envFileVars.add(key.trim());
-
-        if (!value || value.trim() === "") {
-          emptyVars.add(key.trim());
-        }
+      if (!entry.value || entry.value.trim() === "") {
+        emptyVars.add(key);
       }
     });
   }
@@ -204,7 +221,9 @@ function scanProject(rootDir) {
     unused,
     empty: Array.from(emptyVars),
     defaults: Object.fromEntries(defaultValues),
-    grouped: groupedEnv
+    grouped: groupedEnv,
+    locations,
+    parseErrors
   };
 }
 
@@ -213,9 +232,6 @@ function scanProject(rootDir) {
 function scanSecurity(rootDir) {
 
   const issues = [];
-
-  const regex =
-    /(?<![a-zA-Z0-9])(password|secret|token|apikey|key)\b\s*[:=]\s*['"](?!(string|varchar|text|number|boolean|uuid|auto_increment|primary_key|null|undefined|true|false|name|id|type|label|department|category|field|header|consumption|duration)['"])[^'"]{8,}['"]/gi;
 
   function scan(dir) {
     const files = fs.readdirSync(dir);
@@ -227,7 +243,7 @@ function scanSecurity(rootDir) {
         file === ".git" ||
         file === "dist" ||
         file === "build" ||
-        file.startsWith(".")
+        (file.startsWith(".") && file !== ".env")
       ) continue;
 
       const full = path.join(dir, file);
@@ -240,25 +256,8 @@ function scanSecurity(rootDir) {
 
         const lines = content.split("\n");
         lines.forEach((line, index) => {
-          regex.lastIndex = 0;
-          const match = regex.exec(line);
+          const match = detectSecret(line);
           if (match) {
-            const matchedWord = match[1].toLowerCase();
-            const fullMatch = match[0];
-            const valMatch = fullMatch.match(/['"](.*?)['"]/);
-            if (!valMatch) return;
-
-            const value = valMatch[1];
-
-            // Ignore paths/URLs
-            if (value.startsWith("/")) return;
-
-            // Stricter check for generic "key" property
-            if (matchedWord === "key") {
-              const hasComplexity = /[0-9!@#$%^&*()+\-=\[\]{};':"\\|,.<>\/?]/.test(value);
-              if (!hasComplexity) return;
-            }
-
             issues.push({
               file: full,
               line: index + 1,
@@ -272,6 +271,50 @@ function scanSecurity(rootDir) {
 
   scan(rootDir);
   return issues;
+}
+
+function detectSecret(line) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith("#")) return null;
+
+  const match = trimmed.match(
+    /(?<![a-zA-Z0-9])(password|secret|token|apikey|api_key|private_key)\b\s*[:=](?!>)\s*["']?([^"',\s#][^"',#]*)["']?/i
+  );
+
+  if (!match) return null;
+
+  const value = match[2].trim();
+  const normalized = value.toLowerCase();
+  const safeValues = new Set([
+    "string",
+    "varchar",
+    "text",
+    "number",
+    "boolean",
+    "uuid",
+    "auto_increment",
+    "primary_key",
+    "null",
+    "undefined",
+    "true",
+    "false",
+    "name",
+    "id",
+    "type",
+    "label",
+    "department",
+    "category",
+    "field",
+    "header",
+    "consumption",
+    "duration"
+  ]);
+
+  if (safeValues.has(normalized)) return null;
+  if (value.length < 8) return null;
+  if (value.startsWith("/") || /^https?:\/\//i.test(value)) return null;
+
+  return match;
 }
 
 module.exports = {
