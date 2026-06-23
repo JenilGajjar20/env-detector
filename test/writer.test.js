@@ -5,6 +5,7 @@ const path = require("node:path");
 const test = require("node:test");
 const {
   appendMissingVars,
+  importFromBackup,
   parseEnv,
   removeEnvVars,
   updateEnvValues
@@ -136,6 +137,72 @@ test("removeEnvVars removes selected keys while preserving comments and unrelate
     "DB_HOST=localhost",
     "",
     "PORT=3000",
+    ""
+  ].join("\n"));
+});
+
+test("importFromBackup fills only used keys and skips backup-only keys", () => {
+  const rootDir = createFixture();
+  const backupPath = path.join(rootDir, "env-backup");
+
+  fs.writeFileSync(backupPath, [
+    "DB_HOST=localhost",
+    "JWT_SECRET=backup-secret",
+    "OLD_KEY=unused",
+    ""
+  ].join("\n"));
+
+  const result = importFromBackup(
+    envPath(rootDir),
+    backupPath,
+    ["DB_HOST", "JWT_SECRET", "PORT"],
+    { PORT: 3000 }
+  );
+
+  assert.deepEqual(result.added, ["DB_HOST", "JWT_SECRET", "PORT"]);
+  assert.deepEqual(result.filledFromBackup, ["DB_HOST", "JWT_SECRET"]);
+  assert.deepEqual(result.skippedBackupOnly, ["OLD_KEY"]);
+  assert.equal(result.leftEmpty, 0);
+  assert.equal(readEnv(rootDir), [
+    "DB_HOST=localhost",
+    "JWT_SECRET=backup-secret",
+    "PORT=3000",
+    ""
+  ].join("\n"));
+});
+
+test("importFromBackup does not overwrite existing non-empty values", () => {
+  const rootDir = createFixture();
+  const backupPath = path.join(rootDir, "env-backup");
+
+  fs.writeFileSync(envPath(rootDir), [
+    "DB_HOST=current-host",
+    "JWT_SECRET=",
+    ""
+  ].join("\n"));
+
+  fs.writeFileSync(backupPath, [
+    "DB_HOST=backup-host",
+    "JWT_SECRET=backup-secret",
+    "PORT=4000",
+    ""
+  ].join("\n"));
+
+  const result = importFromBackup(
+    envPath(rootDir),
+    backupPath,
+    ["DB_HOST", "JWT_SECRET", "PORT"]
+  );
+
+  assert.deepEqual(result.added, ["PORT"]);
+  assert.deepEqual(result.updated, ["JWT_SECRET"]);
+  assert.deepEqual(result.filledFromBackup, ["JWT_SECRET", "PORT"]);
+  assert.equal(result.leftEmpty, 0);
+  assert.equal(readEnv(rootDir), [
+    "DB_HOST=current-host",
+    "JWT_SECRET=backup-secret",
+    "",
+    "PORT=4000",
     ""
   ].join("\n"));
 });

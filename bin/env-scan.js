@@ -6,6 +6,7 @@ const readline = require("readline-sync");
 const { scanProject, scanSecurity } = require("../src/scan");
 const {
   appendMissingVars,
+  importFromBackup,
   removeEnvVars,
   updateEnvValues
 } = require("../src/writer");
@@ -18,6 +19,7 @@ const askMode = hasFlag("--ask", "-a");
 const compareMode = hasFlag("--compare", "-c");
 const checkMode = hasFlag("--check", "-k");
 const fixMode = hasFlag("--fix", "-f");
+const fromBackupMode = hasFlag("--from-backup");
 const securityMode = hasFlag("--security", "-s");
 const strictMode = hasFlag("--strict", "-t");
 const versionMode = hasFlag("--version", "-v");
@@ -29,13 +31,18 @@ const validFlags = [
   "--compare", "-c",
   "--check", "-k",
   "--fix", "-f",
+  "--from-backup",
   "--security", "-s",
   "--strict", "-t",
   "--version", "-v",
   "--help", "-h"
 ];
 
-const unknownFlag = args.find(arg => arg.startsWith("-") && !validFlags.includes(arg));
+const unknownFlag = args.find(arg => {
+  if (!arg.startsWith("-")) return false;
+  if (arg.startsWith("--from-backup=")) return false;
+  return !validFlags.includes(arg);
+});
 
 if (unknownFlag && !helpMode) {
   console.log(`\nError: Unknown flag "${unknownFlag}"`);
@@ -101,6 +108,11 @@ if (fixMode) {
 
 if (askMode) {
   runAsk(result);
+  process.exit(0);
+}
+
+if (fromBackupMode) {
+  runFromBackup(result);
   process.exit(0);
 }
 
@@ -181,6 +193,37 @@ function runFix(result) {
   const removeResult = removeEnvVars(envPath, varsToDelete);
 
   console.log(`OK: Removed ${removeResult.removed.length} unused variable(s)`);
+  console.log(`Updated: ${path.relative(cwd, envPath)}`);
+}
+
+function runFromBackup(result) {
+  const explicitPath = getFlagValue("--from-backup");
+  const backupPath = resolveBackupPath(explicitPath);
+
+  if (explicitPath) {
+    fs.copyFileSync(backupPath, envPath);
+    console.log("OK: .env copied from backup");
+    console.log(`Backup: ${path.relative(cwd, backupPath)}`);
+    console.log(`Updated: ${path.relative(cwd, envPath)}`);
+    return;
+  }
+
+  if (!result.used.length) {
+    console.log("OK: env scan complete");
+    console.log("No environment variables detected in source files.");
+    console.log("No changes made.");
+    return;
+  }
+
+  const importResult = importFromBackup(envPath, backupPath, result.used, result.defaults, result.grouped);
+
+  console.log("OK: env scan complete");
+  console.log(`Backup: ${path.relative(cwd, backupPath)}`);
+  console.log(`Used: ${result.used.length}`);
+  console.log(`Added: ${importResult.added.length}`);
+  console.log(`Filled from backup: ${importResult.filledFromBackup.length}`);
+  console.log(`Left empty: ${importResult.leftEmpty}`);
+  console.log(`Skipped backup-only keys: ${importResult.skippedBackupOnly.length}`);
   console.log(`Updated: ${path.relative(cwd, envPath)}`);
 }
 
@@ -275,7 +318,9 @@ function unique(values) {
 }
 
 function hasFlag(longFlag, shortFlag) {
-  return args.includes(longFlag) || args.includes(shortFlag);
+  return args.includes(longFlag) ||
+    args.some(arg => arg.startsWith(`${longFlag}=`)) ||
+    (shortFlag ? args.includes(shortFlag) : false);
 }
 
 function findEnvBackupFiles(rootDir) {
@@ -292,6 +337,45 @@ function findEnvBackupFiles(rootDir) {
   return fs.readdirSync(rootDir)
     .filter(file => exactNames.has(file.toLowerCase()))
     .sort((a, b) => a.localeCompare(b));
+}
+
+function getFlagValue(flag) {
+  const equalsArg = args.find(arg => arg.startsWith(`${flag}=`));
+  if (equalsArg) {
+    return equalsArg.slice(flag.length + 1);
+  }
+
+  const index = args.indexOf(flag);
+  if (index === -1) return null;
+
+  const value = args[index + 1];
+  if (!value || value.startsWith("-")) return null;
+
+  return value;
+}
+
+function resolveBackupPath(explicitPath = null) {
+  if (explicitPath) {
+    const fullPath = path.resolve(cwd, explicitPath);
+    if (!fs.existsSync(fullPath)) {
+      console.error(`ERROR: Backup file not found: ${explicitPath}`);
+      process.exit(1);
+    }
+    return fullPath;
+  }
+
+  if (!envBackupFiles.length) {
+    console.error("ERROR: No env backup file found. Pass a path with --from-backup <path>.");
+    process.exit(1);
+  }
+
+  if (envBackupFiles.length > 1) {
+    console.error(`ERROR: Multiple env backup files found: ${envBackupFiles.join(", ")}`);
+    console.error("Pass one explicitly with --from-backup <path>.");
+    process.exit(1);
+  }
+
+  return path.join(cwd, envBackupFiles[0]);
 }
 
 function printEnvBackupNotice(files) {
@@ -318,6 +402,9 @@ Write options:
   env-detector     Add missing variables to .env
   -a, --ask        Prompt for missing or empty values
   -f, --fix        Interactively remove unused variables from .env
+  --from-backup    Import values from an auto-detected env backup file
+  --from-backup <path>
+                   Copy the given backup file to .env
 
 Examples:
   env-detector --compare
@@ -325,6 +412,8 @@ Examples:
   env-detector --strict
   env-detector --ask
   env-detector --fix
+  env-detector --from-backup
+  env-detector --from-backup env-backup
   env-detector --security
   `);
 }

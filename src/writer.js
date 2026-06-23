@@ -84,6 +84,56 @@ function appendMissingVars(envPath, keys, defaults = {}, grouped = {}) {
   return { added: missingKeys };
 }
 
+function importFromBackup(envPath, backupPath, keys, defaults = {}, grouped = {}) {
+  const envContent = readEnvFile(envPath);
+  const backupContent = readEnvFile(backupPath);
+  const envVars = parseEnv(envContent).vars;
+  const backupVars = parseEnv(backupContent).vars;
+  const usedKeys = unique(keys);
+  const appendValues = {};
+  const updateValues = {};
+  const filledKeys = new Set();
+
+  usedKeys.forEach(key => {
+    const existing = envVars.get(key);
+    const backup = backupVars.get(key);
+    const backupValue = backup?.value ?? "";
+    const hasBackupValue = backupValue.trim() !== "";
+
+    if (existing && existing.value.trim() !== "") {
+      return;
+    }
+
+    if (hasBackupValue) {
+      filledKeys.add(key);
+    }
+
+    if (existing) {
+      if (hasBackupValue) {
+        updateValues[key] = backupValue;
+      }
+      return;
+    }
+
+    appendValues[key] = hasBackupValue
+      ? backupValue
+      : defaults[key] ?? "";
+  });
+
+  const appendResult = appendMissingVars(envPath, Object.keys(appendValues), appendValues, grouped);
+  const updateResult = updateEnvValues(envPath, updateValues);
+  const skippedBackupOnly = Array.from(backupVars.keys()).filter(key => !usedKeys.includes(key));
+  const leftEmpty = countEmptyUsedValues(envPath, usedKeys);
+
+  return {
+    added: appendResult.added,
+    updated: updateResult.updated,
+    filledFromBackup: Array.from(filledKeys),
+    leftEmpty,
+    skippedBackupOnly
+  };
+}
+
 function updateEnvValues(envPath, values) {
   const content = readEnvFile(envPath);
   const parsed = parseEnv(content);
@@ -159,8 +209,18 @@ function unique(values) {
   return Array.from(new Set(values));
 }
 
+function countEmptyUsedValues(envPath, keys) {
+  const vars = readEnvVars(envPath);
+
+  return unique(keys).filter(key => {
+    const entry = vars.get(key);
+    return !entry || entry.value.trim() === "";
+  }).length;
+}
+
 module.exports = {
   appendMissingVars,
+  importFromBackup,
   parseEnv,
   readEnvVars,
   removeEnvVars,
