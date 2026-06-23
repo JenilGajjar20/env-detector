@@ -127,9 +127,27 @@ This command preserves comments and unrelated lines while removing selected vari
 
 ### `--security`
 
-Scans source files and `.env` for hardcoded secret-looking values.
+Scans source files for hardcoded secret-looking values.
 
-It is read-only by default and reports potential issues with file and line numbers.
+It flags source code patterns like:
+
+```js
+const JWT_SECRET = "actual-secret-value";
+const apiToken = "hardcoded-token-value";
+```
+
+It does not flag normal runtime usage such as:
+
+```js
+process.env.JWT_SECRET;
+req.headers.authorization;
+```
+
+If `.env` is not ignored by `.gitignore`, `--security` also warns about sensitive-looking values inside `.env`.
+
+If `.env` is already ignored with common patterns such as `.env`, `/.env`, `.env*`, or `.env.*`, those `.env` values are skipped to avoid noisy warnings.
+
+This command is read-only and reports potential issues with file and line numbers.
 
 ## Grouped Config Support
 
@@ -168,5 +186,5 @@ DB_PASSWORD=
 
 - The scanner skips `node_modules`, `.git`, `dist`, `build`, and dot-prefixed files/folders during source scanning.
 - `.env` is parsed separately for variable comparison.
-- `--security` includes `.env` in its scan.
+- `--security` warns about `.env` values only when `.env` is not ignored by `.gitignore`.
 - The tool currently detects direct `process.env.KEY`, bracket access, destructuring from `process.env`, and simple fallback defaults such as `process.env.PORT || 3000`.

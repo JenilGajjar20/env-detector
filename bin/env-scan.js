@@ -73,7 +73,7 @@ if (securityMode) {
   issues.forEach(issue => {
     console.log(`- ${path.relative(cwd, issue.file)}:${issue.line}`);
     console.log(`  ${issue.snippet}`);
-    console.log("  Move this value to an environment variable when possible.");
+    console.log(`  ${issue.message}`);
   });
   console.log(`\nSummary: ${issues.length} potential issue(s) found`);
   process.exit(0);

@@ -232,6 +232,7 @@ function scanProject(rootDir) {
 function scanSecurity(rootDir) {
 
   const issues = [];
+  const ignoredEnvPatterns = getIgnoredEnvPatterns(rootDir);
 
   function scan(dir) {
     const files = fs.readdirSync(dir);
@@ -253,15 +254,22 @@ function scanSecurity(rootDir) {
         scan(full);
       } else if (/\.(js|ts|env)$/.test(file)) {
         const content = fs.readFileSync(full, "utf8");
+        const isEnvFile = file === ".env" || file.endsWith(".env");
 
         const lines = content.split("\n");
         lines.forEach((line, index) => {
-          const match = detectSecret(line);
-          if (match) {
+          if (isEnvFile && isIgnoredEnvFile(file, ignoredEnvPatterns)) {
+            return;
+          }
+
+          const issue = detectSecret(line, isEnvFile);
+          if (issue) {
             issues.push({
               file: full,
               line: index + 1,
-              snippet: line.trim()
+              snippet: line.trim(),
+              type: issue.type,
+              message: issue.message
             });
           }
         });
@@ -273,18 +281,104 @@ function scanSecurity(rootDir) {
   return issues;
 }
 
-function detectSecret(line) {
+function getIgnoredEnvPatterns(rootDir) {
+  const gitignorePath = path.join(rootDir, ".gitignore");
+  const patterns = [];
+
+  if (!fs.existsSync(gitignorePath)) {
+    return patterns;
+  }
+
+  const content = fs.readFileSync(gitignorePath, "utf8");
+
+  content.split(/\r?\n/).forEach(line => {
+    const pattern = line.trim();
+    if (!pattern || pattern.startsWith("#") || pattern.startsWith("!")) return;
+
+    const normalized = pattern.replace(/^\//, "");
+
+    if (
+      normalized === ".env" ||
+      normalized === ".env*" ||
+      normalized === ".env.*"
+    ) {
+      patterns.push(normalized);
+    }
+  });
+
+  return patterns;
+}
+
+function isIgnoredEnvFile(file, patterns) {
+  return patterns.some(pattern => {
+    if (pattern === ".env") return file === ".env";
+    if (pattern === ".env*" || pattern === ".env.*") return file.startsWith(".env");
+    return false;
+  });
+}
+
+function detectSecret(line, isEnvFile) {
   const trimmed = line.trim();
   if (!trimmed || trimmed.startsWith("#")) return null;
 
-  const match = trimmed.match(
-    /(?<![a-zA-Z0-9])(password|secret|token|apikey|api_key|private_key)\b\s*[:=](?!>)\s*["']?([^"',\s#][^"',#]*)["']?/i
-  );
+  return isEnvFile
+    ? detectEnvSecret(trimmed)
+    : detectSourceSecret(trimmed);
+}
+
+function detectEnvSecret(line) {
+  const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY)[A-Za-z0-9_]*)\s*=\s*(.+)\s*$/i);
 
   if (!match) return null;
 
   const value = match[2].trim();
+  if (!isSuspiciousEnvSecretValue(value)) return null;
+
+  return {
+    type: "env-file-secret",
+    message: "Sensitive value found in .env. Make sure this file is not committed."
+  };
+}
+
+function detectSourceSecret(line) {
+  const match = line.match(
+    /(?:^|[,{(]\s*|(?:const|let|var|private|public|protected|static|readonly)\s+)([A-Za-z_][A-Za-z0-9_]*(?:password|secret|token|apikey|api_key|private_key)[A-Za-z0-9_]*)\s*[:=]\s*(["'`])([^"'`]+)\2/i
+  );
+
+  if (!match) return null;
+
+  const value = match[3].trim();
+  if (!isSuspiciousSourceSecretValue(value)) return null;
+
+  return {
+    type: "hardcoded-secret",
+    message: "Hardcoded secret-looking value found. Move this value to an environment variable."
+  };
+}
+
+function isSuspiciousEnvSecretValue(value) {
+  const normalized = value.toLowerCase().replace(/^["']|["']$/g, "");
+
+  if (!normalized || normalized.length < 8) return false;
+  if (isSafePlaceholder(normalized)) return false;
+  if (normalized.startsWith("/") || /^https?:\/\//i.test(normalized)) return false;
+
+  return true;
+}
+
+function isSuspiciousSourceSecretValue(value) {
   const normalized = value.toLowerCase();
+
+  if (isSafePlaceholder(normalized)) return false;
+  if (value.length < 8) return false;
+  if (value.startsWith("/") || /^https?:\/\//i.test(value)) return false;
+  if (/^process\.env\./i.test(value)) return false;
+  if (/^[A-Za-z_$][A-Za-z0-9_$.]*(\(.*\))?$/.test(value)) return false;
+
+  return true;
+}
+
+function isSafePlaceholder(value) {
   const safeValues = new Set([
     "string",
     "varchar",
@@ -310,11 +404,7 @@ function detectSecret(line) {
     "duration"
   ]);
 
-  if (safeValues.has(normalized)) return null;
-  if (value.length < 8) return null;
-  if (value.startsWith("/") || /^https?:\/\//i.test(value)) return null;
-
-  return match;
+  return safeValues.has(value);
 }
 
 module.exports = {
