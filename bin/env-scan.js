@@ -3,6 +3,18 @@
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline-sync");
+const { createArgParser } = require("../src/args");
+const { findEnvBackupFiles, resolveBackupPath } = require("../src/backup");
+const {
+  printCheck,
+  printCompare,
+  printEnvBackupNotice,
+  printHelp,
+  printSecurityIssues,
+  printStrict,
+  printSummary,
+  sorted
+} = require("../src/output");
 const { scanProject, scanSecurity } = require("../src/scan");
 const {
   appendMissingVars,
@@ -14,18 +26,6 @@ const {
 const cwd = process.cwd();
 const envPath = path.join(cwd, ".env");
 const args = process.argv.slice(2);
-
-const askMode = hasFlag("--ask", "-a");
-const compareMode = hasFlag("--compare", "-c");
-const checkMode = hasFlag("--check", "-k");
-const fixMode = hasFlag("--fix", "-f");
-const fromBackupMode = hasFlag("--from-backup");
-const securityMode = hasFlag("--security", "-s");
-const strictMode = hasFlag("--strict", "-t");
-const versionMode = hasFlag("--version", "-v");
-const helpMode = hasFlag("--help", "-h");
-const envBackupFiles = findEnvBackupFiles(cwd);
-
 const validFlags = [
   "--ask", "-a",
   "--compare", "-c",
@@ -37,12 +37,19 @@ const validFlags = [
   "--version", "-v",
   "--help", "-h"
 ];
+const { findUnknownFlag, getFlagValue, hasFlag } = createArgParser(args, validFlags);
+const askMode = hasFlag("--ask", "-a");
+const compareMode = hasFlag("--compare", "-c");
+const checkMode = hasFlag("--check", "-k");
+const fixMode = hasFlag("--fix", "-f");
+const fromBackupMode = hasFlag("--from-backup");
+const securityMode = hasFlag("--security", "-s");
+const strictMode = hasFlag("--strict", "-t");
+const versionMode = hasFlag("--version", "-v");
+const helpMode = hasFlag("--help", "-h");
+const envBackupFiles = findEnvBackupFiles(cwd);
 
-const unknownFlag = args.find(arg => {
-  if (!arg.startsWith("-")) return false;
-  if (arg.startsWith("--from-backup=")) return false;
-  return !validFlags.includes(arg);
-});
+const unknownFlag = findUnknownFlag();
 
 if (unknownFlag && !helpMode) {
   console.log(`\nError: Unknown flag "${unknownFlag}"`);
@@ -76,13 +83,7 @@ if (securityMode) {
     process.exit(0);
   }
 
-  console.log("\nSecurity issues found:");
-  issues.forEach(issue => {
-    console.log(`- ${path.relative(cwd, issue.file)}:${issue.line}`);
-    console.log(`  ${issue.snippet}`);
-    console.log(`  ${issue.message}`);
-  });
-  console.log(`\nSummary: ${issues.length} potential issue(s) found`);
+  printSecurityIssues(issues, cwd);
   process.exit(0);
 }
 
@@ -198,7 +199,17 @@ function runFix(result) {
 
 function runFromBackup(result) {
   const explicitPath = getFlagValue("--from-backup");
-  const backupPath = resolveBackupPath(explicitPath);
+  const resolvedBackup = resolveBackupPath(cwd, envBackupFiles, explicitPath);
+
+  if (resolvedBackup.error) {
+    console.error(`ERROR: ${resolvedBackup.error}`);
+    if (resolvedBackup.hint) {
+      console.error(resolvedBackup.hint);
+    }
+    process.exit(1);
+  }
+
+  const backupPath = resolvedBackup.path;
 
   if (explicitPath) {
     fs.copyFileSync(backupPath, envPath);
@@ -227,193 +238,10 @@ function runFromBackup(result) {
   console.log(`Updated: ${path.relative(cwd, envPath)}`);
 }
 
-function printCompare(result) {
-  console.log("");
-  printCategory("Used", result.used, result);
-  printCategory("Missing", result.missing, result);
-  printCategory("Empty", result.empty, result);
-  printCategory("Unused", result.unused, result);
-
-  if (result.parseErrors.length) {
-    console.log(`\nSkipped files: ${result.parseErrors.length}`);
-    result.parseErrors.forEach(err => console.log(`- ${err.file}: ${err.message}`));
-  }
-
-  console.log("\nSummary:");
-  printSummary(result);
-}
-
-function printCheck(result) {
-  if (!result.missing.length && !result.empty.length) {
-    console.log("OK: ENV check passed");
-    printSummary(result);
-    return;
-  }
-
-  console.log("ERROR: ENV check failed");
-  printCategory("Missing", result.missing, result);
-  printCategory("Empty", result.empty, result);
-  console.log("\nUnused variables are reported by --compare and enforced by --strict.");
-}
-
-function printStrict(result) {
-  if (!result.missing.length && !result.empty.length && !result.unused.length) {
-    console.log("OK: strict mode passed");
-    printSummary(result);
-    return;
-  }
-
-  console.log("ERROR: strict mode failed");
-  printCategory("Missing", result.missing, result);
-  printCategory("Empty", result.empty, result);
-  printCategory("Unused", result.unused, result);
-  console.log("\nSummary:");
-  printSummary(result);
-}
-
-function printCategory(label, values, result) {
-  console.log(`\n${label} (${values.length}):`);
-
-  if (!values.length) {
-    console.log("  none");
-    return;
-  }
-
-  sorted(values).forEach(key => {
-    const defaultValue = Object.prototype.hasOwnProperty.call(result.defaults, key)
-      ? ` default=${result.defaults[key]}`
-      : "";
-    const locations = result.locations[key]?.length
-      ? ` (${formatLocations(result.locations[key])})`
-      : "";
-
-    console.log(`  - ${key}${defaultValue}${locations}`);
-  });
-}
-
-function printSummary(result) {
-  console.log(`Used: ${result.used.length}`);
-  console.log(`Missing: ${result.missing.length}`);
-  console.log(`Empty: ${result.empty.length}`);
-  console.log(`Unused: ${result.unused.length}`);
-}
-
-function formatLocations(locations) {
-  return locations
-    .slice(0, 3)
-    .map(location => location.line ? `${location.file}:${location.line}` : location.file)
-    .join(", ");
-}
-
 function isLikelySecret(key) {
   return /(PASSWORD|SECRET|TOKEN|API_?KEY|JWT)/i.test(key);
 }
 
-function sorted(values) {
-  return [...values].sort((a, b) => a.localeCompare(b));
-}
-
 function unique(values) {
   return Array.from(new Set(values));
-}
-
-function hasFlag(longFlag, shortFlag) {
-  return args.includes(longFlag) ||
-    args.some(arg => arg.startsWith(`${longFlag}=`)) ||
-    (shortFlag ? args.includes(shortFlag) : false);
-}
-
-function findEnvBackupFiles(rootDir) {
-  const exactNames = new Set([
-    ".env.backup",
-    ".env.bak",
-    ".env_backup",
-    "env-backup",
-    "env.backup",
-    "env.bak",
-    "env_backup"
-  ]);
-
-  return fs.readdirSync(rootDir)
-    .filter(file => exactNames.has(file.toLowerCase()))
-    .sort((a, b) => a.localeCompare(b));
-}
-
-function getFlagValue(flag) {
-  const equalsArg = args.find(arg => arg.startsWith(`${flag}=`));
-  if (equalsArg) {
-    return equalsArg.slice(flag.length + 1);
-  }
-
-  const index = args.indexOf(flag);
-  if (index === -1) return null;
-
-  const value = args[index + 1];
-  if (!value || value.startsWith("-")) return null;
-
-  return value;
-}
-
-function resolveBackupPath(explicitPath = null) {
-  if (explicitPath) {
-    const fullPath = path.resolve(cwd, explicitPath);
-    if (!fs.existsSync(fullPath)) {
-      console.error(`ERROR: Backup file not found: ${explicitPath}`);
-      process.exit(1);
-    }
-    return fullPath;
-  }
-
-  if (!envBackupFiles.length) {
-    console.error("ERROR: No env backup file found. Pass a path with --from-backup <path>.");
-    process.exit(1);
-  }
-
-  if (envBackupFiles.length > 1) {
-    console.error(`ERROR: Multiple env backup files found: ${envBackupFiles.join(", ")}`);
-    console.error("Pass one explicitly with --from-backup <path>.");
-    process.exit(1);
-  }
-
-  return path.join(cwd, envBackupFiles[0]);
-}
-
-function printEnvBackupNotice(files) {
-  if (!files.length) return;
-
-  console.log("");
-  console.log(`Notice: Found env backup file(s): ${files.join(", ")}`);
-  console.log("Values were not copied automatically. Review them manually before moving secrets into .env.");
-}
-
-function printHelp() {
-  console.log(`
-Usage: env-detector [options]
-
-Read-only options:
-  -c, --compare    Show used, missing, empty, and unused variables
-  -k, --check      Fail if variables are missing or empty
-  -s, --security   Scan for hardcoded secrets in source files and .env
-  -t, --strict     Fail if variables are missing, empty, or unused
-  -v, --version    Show version information
-  -h, --help       Show this help message
-
-Write options:
-  env-detector     Add missing variables to .env
-  -a, --ask        Prompt for missing or empty values
-  -f, --fix        Interactively remove unused variables from .env
-  --from-backup    Import values from an auto-detected env backup file
-  --from-backup <path>
-                   Copy the given backup file to .env
-
-Examples:
-  env-detector --compare
-  env-detector --check
-  env-detector --strict
-  env-detector --ask
-  env-detector --fix
-  env-detector --from-backup
-  env-detector --from-backup env-backup
-  env-detector --security
-  `);
 }
