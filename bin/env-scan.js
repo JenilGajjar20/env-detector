@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+const fs = require("fs");
 const path = require("path");
 const readline = require("readline-sync");
 const { scanProject, scanSecurity } = require("../src/scan");
@@ -21,6 +22,7 @@ const securityMode = hasFlag("--security", "-s");
 const strictMode = hasFlag("--strict", "-t");
 const versionMode = hasFlag("--version", "-v");
 const helpMode = hasFlag("--help", "-h");
+const envBackupFiles = findEnvBackupFiles(cwd);
 
 const validFlags = [
   "--ask", "-a",
@@ -122,6 +124,7 @@ console.log(`Unused: ${result.unused.length}`);
 
 if (writeResult.added.length) {
   console.log(`Updated: ${path.relative(cwd, envPath)}`);
+  printEnvBackupNotice(envBackupFiles);
 }
 
 function runAsk(result) {
@@ -273,6 +276,30 @@ function unique(values) {
 
 function hasFlag(longFlag, shortFlag) {
   return args.includes(longFlag) || args.includes(shortFlag);
+}
+
+function findEnvBackupFiles(rootDir) {
+  const exactNames = new Set([
+    ".env.backup",
+    ".env.bak",
+    ".env_backup",
+    "env-backup",
+    "env.backup",
+    "env.bak",
+    "env_backup"
+  ]);
+
+  return fs.readdirSync(rootDir)
+    .filter(file => exactNames.has(file.toLowerCase()))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function printEnvBackupNotice(files) {
+  if (!files.length) return;
+
+  console.log("");
+  console.log(`Notice: Found env backup file(s): ${files.join(", ")}`);
+  console.log("Values were not copied automatically. Review them manually before moving secrets into .env.");
 }
 
 function printHelp() {
