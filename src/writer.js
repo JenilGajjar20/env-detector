@@ -64,8 +64,15 @@ function appendMissingVars(envPath, keys, defaults = {}, grouped = {}) {
     chunks.push(formatSection(null, globalKeys, defaults));
   }
 
+  const writtenKeys = new Set();
+
   Object.entries(grouped).forEach(([group, keysForGroup]) => {
-    const sectionKeys = keysForGroup.filter(key => missingKeys.includes(key));
+    const sectionKeys = unique(keysForGroup).filter(key =>
+      missingKeys.includes(key) && !writtenKeys.has(key)
+    );
+
+    sectionKeys.forEach(key => writtenKeys.add(key));
+
     if (sectionKeys.length) {
       chunks.push(formatSection(group, sectionKeys, defaults));
     }

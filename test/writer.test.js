@@ -89,6 +89,28 @@ test("appendMissingVars writes grouped missing keys when grouped config is provi
   ].join("\n"));
 });
 
+test("appendMissingVars does not duplicate keys across grouped sections", () => {
+  const rootDir = createFixture();
+
+  const result = appendMissingVars(
+    envPath(rootDir),
+    ["DB_USERNAME", "DB_PASSWORD"],
+    {},
+    {
+      development: ["DB_USERNAME", "DB_PASSWORD"],
+      production: ["DB_USERNAME"]
+    }
+  );
+
+  assert.deepEqual(result.added, ["DB_USERNAME", "DB_PASSWORD"]);
+  assert.equal(readEnv(rootDir), [
+    "# development",
+    "DB_USERNAME=",
+    "DB_PASSWORD=",
+    ""
+  ].join("\n"));
+});
+
 test("updateEnvValues updates existing keys and appends new keys", () => {
   const rootDir = createFixture();
 
