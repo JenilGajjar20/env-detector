@@ -82,7 +82,7 @@ function scanProject(rootDir) {
                   recordUsage(key, fullPath, prop.value);
                 }
 
-                // process.env.KEY || value
+                // process.env.KEY || value / process.env.KEY ?? value
                 if (prop.value.type === "LogicalExpression") {
 
                   const left = prop.value.left;
@@ -98,11 +98,7 @@ function scanProject(rootDir) {
                     vars.add(key);
                     recordUsage(key, fullPath, left);
 
-                    if (
-                      right.type === "StringLiteral" ||
-                      right.type === "NumericLiteral" ||
-                      right.type === "BooleanLiteral"
-                    ) {
+                    if (isFallbackExpression(prop.value) && isLiteralDefault(right)) {
                       defaultValues.set(key, right.value);
                     }
                   }
@@ -165,11 +161,7 @@ function scanProject(rootDir) {
 
                 recordUsage(key, fullPath, left);
 
-                if (
-                  right.type === "StringLiteral" ||
-                  right.type === "NumericLiteral" ||
-                  right.type === "BooleanLiteral"
-                ) {
+                if (isFallbackExpression(path.node) && isLiteralDefault(right)) {
                   defaultValues.set(key, right.value);
                 }
               }
@@ -225,6 +217,16 @@ function scanProject(rootDir) {
     locations,
     parseErrors
   };
+}
+
+function isFallbackExpression(node) {
+  return node.operator === "||" || node.operator === "??";
+}
+
+function isLiteralDefault(node) {
+  return node.type === "StringLiteral" ||
+    node.type === "NumericLiteral" ||
+    node.type === "BooleanLiteral";
 }
 
 

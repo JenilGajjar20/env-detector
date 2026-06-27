@@ -66,6 +66,44 @@ test("scanProject detects grouped config variables and defaults", () => {
   assert.equal(result.defaults.DBPASSWORD, "dev-password");
 });
 
+test("scanProject records defaults only for fallback logical operators", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, "src/fallbacks.js", [
+    "const port = process.env.PORT || 3000;",
+    "const host = process.env.HOST ?? \"localhost\";",
+    "const enabled = process.env.FEATURE_ENABLED && true;",
+    ""
+  ].join("\n"));
+
+  const result = scanProject(rootDir);
+
+  assert.deepEqual(sort(result.used), ["FEATURE_ENABLED", "HOST", "PORT"]);
+  assert.equal(result.defaults.PORT, 3000);
+  assert.equal(result.defaults.HOST, "localhost");
+  assert.equal(Object.prototype.hasOwnProperty.call(result.defaults, "FEATURE_ENABLED"), false);
+});
+
+test("scanProject records grouped defaults only for fallback logical operators", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, "config/app.js", [
+    "module.exports = {",
+    "  development: {",
+    "    port: process.env.PORT || 3000,",
+    "    enabled: process.env.FEATURE_ENABLED && true",
+    "  }",
+    "};",
+    ""
+  ].join("\n"));
+
+  const result = scanProject(rootDir);
+
+  assert.deepEqual(sort(result.grouped.development), ["FEATURE_ENABLED", "PORT"]);
+  assert.equal(result.defaults.PORT, 3000);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.defaults, "FEATURE_ENABLED"), false);
+});
+
 test("scanProject records parse errors while continuing to scan valid files", () => {
   const rootDir = createFixture();
 
