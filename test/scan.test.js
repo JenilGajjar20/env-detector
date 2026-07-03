@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { scanProject } = require("../src/scan");
+const { scanProject, scanSecurity } = require("../src/scan");
 
 function createFixture() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "env-detector-scan-"));
@@ -117,4 +117,25 @@ test("scanProject records parse errors while continuing to scan valid files", ()
   assert.equal(result.parseErrors.length, 1);
   assert.equal(result.parseErrors[0].file, path.join("src", "invalid.js"));
   assert.match(result.parseErrors[0].message, /Unexpected token|Unexpected/);
+});
+
+test("scanSecurity scans common JavaScript and TypeScript source extensions", () => {
+  const rootDir = createFixture();
+  const extensions = ["js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts"];
+
+  extensions.forEach(extension => {
+    writeFile(
+      rootDir,
+      path.join("src", `secret.${extension}`),
+      `const apiToken = "hardcoded-token-${extension}";\n`
+    );
+  });
+
+  const issues = scanSecurity(rootDir);
+  const issueFiles = issues.map(issue => path.basename(issue.file)).sort();
+
+  assert.deepEqual(
+    issueFiles,
+    extensions.map(extension => `secret.${extension}`).sort()
+  );
 });

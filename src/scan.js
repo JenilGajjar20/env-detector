@@ -4,6 +4,17 @@ const parser = require("@babel/parser");
 const traverse = require("@babel/traverse").default;
 const { parseEnv } = require("./writer");
 
+const SECURITY_SOURCE_EXTENSIONS = new Set([
+  ".js",
+  ".jsx",
+  ".ts",
+  ".tsx",
+  ".mjs",
+  ".cjs",
+  ".mts",
+  ".cts"
+]);
+
 function scanProject(rootDir) {
   const usedEnvVars = new Set();
   const defaultValues = new Map();
@@ -254,7 +265,7 @@ function scanSecurity(rootDir) {
 
       if (stat.isDirectory()) {
         scan(full);
-      } else if (/\.(js|ts|env)$/.test(file)) {
+      } else if (shouldScanSecurityFile(file)) {
         const content = fs.readFileSync(full, "utf8");
         const isEnvFile = file === ".env" || file.endsWith(".env");
 
@@ -281,6 +292,12 @@ function scanSecurity(rootDir) {
 
   scan(rootDir);
   return issues;
+}
+
+function shouldScanSecurityFile(file) {
+  return file === ".env" ||
+    file.endsWith(".env") ||
+    SECURITY_SOURCE_EXTENSIONS.has(path.extname(file));
 }
 
 function getIgnoredEnvPatterns(rootDir) {
