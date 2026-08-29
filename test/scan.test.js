@@ -187,3 +187,26 @@ test("scanSecurity scans common JavaScript and TypeScript source extensions", ()
     extensions.map(extension => `secret.${extension}`).sort()
   );
 });
+
+test("scanSecurity respects gitignore patterns for env files", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, ".gitignore", [
+    ".env.local",
+    "config/.env",
+    "*.secret.env",
+    ""
+  ].join("\n"));
+
+  writeFile(rootDir, ".env.local", "SMTP_PASSWORD=local-password\n");
+  writeFile(rootDir, path.join("config", ".env"), "JWT_SECRET=config-secret\n");
+  writeFile(rootDir, "production.secret.env", "API_KEY=production-secret\n");
+  writeFile(rootDir, ".env", "DB_PASSWORD=root-password\n");
+
+  const issues = scanSecurity(rootDir);
+
+  assert.deepEqual(
+    issues.map(issue => path.basename(issue.file)),
+    [".env"]
+  );
+});
