@@ -46,6 +46,54 @@ test("scanProject detects used, missing, empty, unused, defaults, and locations"
   assert.deepEqual(result.locations.DB_HOST, [{ file: path.join("src", "app.js"), line: 1 }]);
 });
 
+test("scanProject treats quoted blank env values as empty", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, "src/app.js", [
+    "process.env.EMPTY_DOUBLE;",
+    "process.env.EMPTY_SINGLE;",
+    "process.env.EMPTY_SPACES;",
+    "process.env.NON_EMPTY;",
+    ""
+  ].join("\n"));
+
+  writeFile(rootDir, ".env", [
+    'EMPTY_DOUBLE=""',
+    "EMPTY_SINGLE=''",
+    "EMPTY_SPACES='   '",
+    'NON_EMPTY="actual"',
+    ""
+  ].join("\n"));
+
+  const result = scanProject(rootDir);
+
+  assert.deepEqual(sort(result.empty), ["EMPTY_DOUBLE", "EMPTY_SINGLE", "EMPTY_SPACES"]);
+  assert.equal(result.empty.includes("NON_EMPTY"), false);
+});
+
+test("scanProject handles inline .env comments when detecting empty values", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, "src/app.js", [
+    "process.env.EMPTY_WITH_COMMENT;",
+    "process.env.VALUE_WITH_COMMENT;",
+    "process.env.QUOTED_HASH;",
+    ""
+  ].join("\n"));
+
+  writeFile(rootDir, ".env", [
+    "EMPTY_WITH_COMMENT= # fill this later",
+    "VALUE_WITH_COMMENT=present # comment",
+    "QUOTED_HASH=\"value # inside quotes\" # comment",
+    ""
+  ].join("\n"));
+
+  const result = scanProject(rootDir);
+
+  assert.deepEqual(result.empty, ["EMPTY_WITH_COMMENT"]);
+  assert.equal(result.missing.length, 0);
+});
+
 test("scanProject detects grouped config variables and defaults", () => {
   const rootDir = createFixture();
 

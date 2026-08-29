@@ -26,7 +26,7 @@ function parseEnvLine(line) {
 
   return {
     key: match[1],
-    value: match[2]
+    value: splitEnvValueComment(match[2]).value
   };
 }
 
@@ -105,9 +105,9 @@ function importFromBackup(envPath, backupPath, keys, defaults = {}, grouped = {}
     const existing = envVars.get(key);
     const backup = backupVars.get(key);
     const backupValue = backup?.value ?? "";
-    const hasBackupValue = backupValue.trim() !== "";
+    const hasBackupValue = !isEmptyEnvValue(backupValue);
 
-    if (existing && existing.value.trim() !== "") {
+    if (existing && !isEmptyEnvValue(existing.value)) {
       return;
     }
 
@@ -191,7 +191,11 @@ function removeEnvVars(envPath, keys) {
 }
 
 function replaceEnvLineValue(line, value) {
-  return line.replace(/^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=).*$/, `$1${value}`);
+  const match = line.match(/^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=)(.*)$/);
+  if (!match) return line;
+
+  const { comment } = splitEnvValueComment(match[2]);
+  return `${match[1]}${value}${comment}`;
 }
 
 function formatSection(name, keys, defaults) {
@@ -221,14 +225,84 @@ function countEmptyUsedValues(envPath, keys) {
 
   return unique(keys).filter(key => {
     const entry = vars.get(key);
-    return !entry || entry.value.trim() === "";
+    return !entry || isEmptyEnvValue(entry.value);
   }).length;
+}
+
+function normalizeEnvValue(value) {
+  const trimmed = String(value ?? "").trim();
+  const quote = trimmed[0];
+
+  if (
+    (quote === "\"" || quote === "'") &&
+    trimmed.endsWith(quote) &&
+    trimmed.length >= 2
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+
+  return trimmed;
+}
+
+function isEmptyEnvValue(value) {
+  return normalizeEnvValue(value) === "";
+}
+
+function splitEnvValueComment(value) {
+  const input = String(value ?? "");
+  const commentIndex = findInlineCommentIndex(input);
+
+  if (commentIndex === -1) {
+    return { value: input, comment: "" };
+  }
+
+  return {
+    value: input.slice(0, commentIndex).trimEnd(),
+    comment: input.slice(commentIndex)
+  };
+}
+
+function findInlineCommentIndex(value) {
+  let quote = null;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    const previous = value[index - 1];
+
+    if ((char === "\"" || char === "'") && previous !== "\\") {
+      if (quote === char) {
+        quote = null;
+      } else if (!quote) {
+        quote = char;
+      }
+      continue;
+    }
+
+    if (
+      char === "#" &&
+      !quote &&
+      (index === 0 || /\s/.test(previous))
+    ) {
+      let commentStart = index;
+
+      while (commentStart > 0 && /\s/.test(value[commentStart - 1])) {
+        commentStart -= 1;
+      }
+
+      return commentStart;
+    }
+  }
+
+  return -1;
 }
 
 module.exports = {
   appendMissingVars,
   importFromBackup,
+  isEmptyEnvValue,
+  normalizeEnvValue,
   parseEnv,
+  parseEnvLine,
   readEnvVars,
   removeEnvVars,
   updateEnvValues
