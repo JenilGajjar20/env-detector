@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const parser = require("@babel/parser");
 const traverse = require("@babel/traverse").default;
-const { isEmptyEnvValue, parseEnv } = require("./writer");
+const { isEmptyEnvValue, parseEnv, parseEnvLine } = require("./writer");
 
 const SECURITY_SOURCE_EXTENSIONS = new Set([
   ".js",
@@ -257,21 +257,22 @@ function scanSecurity(rootDir) {
         file === ".git" ||
         file === "dist" ||
         file === "build" ||
-        (file.startsWith(".") && file !== ".env")
+        (file.startsWith(".") && !isEnvSecurityFile(file))
       ) continue;
 
       const full = path.join(dir, file);
       const stat = fs.statSync(full);
+      const relativePath = path.relative(rootDir, full);
 
       if (stat.isDirectory()) {
         scan(full);
       } else if (shouldScanSecurityFile(file)) {
         const content = fs.readFileSync(full, "utf8");
-        const isEnvFile = file === ".env" || file.endsWith(".env");
+        const isEnvFile = isEnvSecurityFile(file);
 
         const lines = content.split("\n");
         lines.forEach((line, index) => {
-          if (isEnvFile && isIgnoredEnvFile(file, ignoredEnvPatterns)) {
+          if (isEnvFile && isIgnoredEnvFile(relativePath, ignoredEnvPatterns)) {
             return;
           }
 
@@ -295,9 +296,16 @@ function scanSecurity(rootDir) {
 }
 
 function shouldScanSecurityFile(file) {
-  return file === ".env" ||
-    file.endsWith(".env") ||
+  return isEnvSecurityFile(file) ||
     SECURITY_SOURCE_EXTENSIONS.has(path.extname(file));
+}
+
+function isEnvSecurityFile(file) {
+  const basename = path.basename(file);
+
+  return basename === ".env" ||
+    basename.startsWith(".env.") ||
+    basename.endsWith(".env");
 }
 
 function getIgnoredEnvPatterns(rootDir) {
@@ -314,26 +322,59 @@ function getIgnoredEnvPatterns(rootDir) {
     const pattern = line.trim();
     if (!pattern || pattern.startsWith("#") || pattern.startsWith("!")) return;
 
-    const normalized = pattern.replace(/^\//, "");
-
-    if (
-      normalized === ".env" ||
-      normalized === ".env*" ||
-      normalized === ".env.*"
-    ) {
-      patterns.push(normalized);
-    }
+    patterns.push(pattern);
   });
 
   return patterns;
 }
 
-function isIgnoredEnvFile(file, patterns) {
-  return patterns.some(pattern => {
-    if (pattern === ".env") return file === ".env";
-    if (pattern === ".env*" || pattern === ".env.*") return file.startsWith(".env");
-    return false;
-  });
+function isIgnoredEnvFile(filePath, patterns) {
+  const normalizedPath = toPosixPath(filePath);
+  const basename = path.posix.basename(normalizedPath);
+
+  return patterns.some(pattern => matchesGitignorePattern(normalizedPath, basename, pattern));
+}
+
+function matchesGitignorePattern(filePath, basename, pattern) {
+  const normalizedPattern = toPosixPath(pattern).replace(/^\/+/, "");
+  if (!normalizedPattern) return false;
+
+  if (!normalizedPattern.includes("/")) {
+    return globToRegExp(normalizedPattern).test(basename);
+  }
+
+  return globToRegExp(normalizedPattern).test(filePath);
+}
+
+function globToRegExp(pattern) {
+  const source = pattern
+    .split("")
+    .map((char, index, chars) => {
+      if (char === "*") {
+        if (chars[index + 1] === "*") {
+          return "";
+        }
+
+        return "[^/]*";
+      }
+
+      if (chars[index - 1] === "*") {
+        return char === "/" ? "(?:.*/)?" : "";
+      }
+
+      return escapeRegExp(char);
+    })
+    .join("");
+
+  return new RegExp(`^${source}$`);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+function toPosixPath(value) {
+  return value.replace(/\\/g, "/");
 }
 
 function detectSecret(line, isEnvFile) {
@@ -346,11 +387,12 @@ function detectSecret(line, isEnvFile) {
 }
 
 function detectEnvSecret(line) {
-  const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY)[A-Za-z0-9_]*)\s*=\s*(.+)\s*$/i);
+  const parsed = parseEnvLine(line);
 
-  if (!match) return null;
+  if (!parsed) return null;
+  if (!isSensitiveKey(parsed.key)) return null;
 
-  const value = match[2].trim();
+  const value = parsed.value.trim();
   if (!isSuspiciousEnvSecretValue(value)) return null;
 
   return {
@@ -361,10 +403,13 @@ function detectEnvSecret(line) {
 
 function detectSourceSecret(line) {
   const match = line.match(
-    /(?:^|[,{(]\s*|(?:const|let|var|private|public|protected|static|readonly)\s+)([A-Za-z_][A-Za-z0-9_]*(?:password|secret|token|apikey|api_key|private_key)[A-Za-z0-9_]*)\s*[:=]\s*(["'`])([^"'`]+)\2/i
+    /(?:^|(?:const|let|var|private|public|protected|static|readonly)\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(["'`])([^"'`]+)\2/i
+  ) || line.match(
+    /(?:^|[,{(]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(["'`])([^"'`]+)\2/i
   );
 
   if (!match) return null;
+  if (!isSensitiveKey(match[1])) return null;
 
   const value = match[3].trim();
   if (!isSuspiciousSourceSecretValue(value)) return null;
@@ -373,6 +418,10 @@ function detectSourceSecret(line) {
     type: "hardcoded-secret",
     message: "Hardcoded secret-looking value found. Move this value to an environment variable."
   };
+}
+
+function isSensitiveKey(key) {
+  return /(?:PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY)/i.test(key);
 }
 
 function isSuspiciousEnvSecretValue(value) {
@@ -420,7 +469,17 @@ function isSafePlaceholder(value) {
     "field",
     "header",
     "consumption",
-    "duration"
+    "duration",
+    "password",
+    "secret",
+    "token",
+    "apikey",
+    "api_key",
+    "private_key",
+    "example",
+    "sample",
+    "placeholder",
+    "changeme"
   ]);
 
   return safeValues.has(value);

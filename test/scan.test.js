@@ -187,3 +187,80 @@ test("scanSecurity scans common JavaScript and TypeScript source extensions", ()
     extensions.map(extension => `secret.${extension}`).sort()
   );
 });
+
+test("scanSecurity respects gitignore patterns for env files", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, ".gitignore", [
+    ".env.local",
+    "config/.env",
+    "*.secret.env",
+    ""
+  ].join("\n"));
+
+  writeFile(rootDir, ".env.local", "SMTP_PASSWORD=local-password\n");
+  writeFile(rootDir, path.join("config", ".env"), "JWT_SECRET=config-secret\n");
+  writeFile(rootDir, "production.secret.env", "API_KEY=production-secret\n");
+  writeFile(rootDir, ".env", "DB_PASSWORD=root-password\n");
+
+  const issues = scanSecurity(rootDir);
+
+  assert.deepEqual(
+    issues.map(issue => path.basename(issue.file)),
+    [".env"]
+  );
+});
+
+test("scanSecurity reports representative env and source secrets", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, ".env", [
+    "JWT_SECRET=prod-jwt-secret-value",
+    "API_KEY=prod-api-key-value",
+    ""
+  ].join("\n"));
+
+  writeFile(rootDir, "src/secrets.js", [
+    "const dbPassword = \"prod-db-password-value\";",
+    "const privateToken = `prod-private-token-value`;",
+    "const config = { apiKey: \"prod-source-api-key\" };",
+    ""
+  ].join("\n"));
+
+  const issues = scanSecurity(rootDir);
+  const issueTypes = issues.map(issue => issue.type).sort();
+
+  assert.deepEqual(issueTypes, [
+    "env-file-secret",
+    "env-file-secret",
+    "hardcoded-secret",
+    "hardcoded-secret",
+    "hardcoded-secret"
+  ]);
+});
+
+test("scanSecurity ignores common placeholders and non-secret values", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, ".env", [
+    "JWT_SECRET=secret",
+    "API_KEY=placeholder",
+    "SMTP_PASSWORD=short # comment should not make this suspicious",
+    "TOKEN_URL=https://example.com/token",
+    "CERT_PRIVATE_KEY=/etc/certs/private.key",
+    ""
+  ].join("\n"));
+
+  writeFile(rootDir, "src/placeholders.js", [
+    "const password = \"password\";",
+    "const jwtSecret = \"process.env.JWT_SECRET\";",
+    "const secretPath = \"/etc/secrets/app\";",
+    "const tokenUrl = \"https://example.com/token\";",
+    "const passwordField = \"varchar\";",
+    ""
+  ].join("\n"));
+
+  const issues = scanSecurity(rootDir);
+
+  assert.deepEqual(issues, []);
+});
