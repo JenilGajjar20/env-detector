@@ -210,3 +210,57 @@ test("scanSecurity respects gitignore patterns for env files", () => {
     [".env"]
   );
 });
+
+test("scanSecurity reports representative env and source secrets", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, ".env", [
+    "JWT_SECRET=prod-jwt-secret-value",
+    "API_KEY=prod-api-key-value",
+    ""
+  ].join("\n"));
+
+  writeFile(rootDir, "src/secrets.js", [
+    "const dbPassword = \"prod-db-password-value\";",
+    "const privateToken = `prod-private-token-value`;",
+    "const config = { apiKey: \"prod-source-api-key\" };",
+    ""
+  ].join("\n"));
+
+  const issues = scanSecurity(rootDir);
+  const issueTypes = issues.map(issue => issue.type).sort();
+
+  assert.deepEqual(issueTypes, [
+    "env-file-secret",
+    "env-file-secret",
+    "hardcoded-secret",
+    "hardcoded-secret",
+    "hardcoded-secret"
+  ]);
+});
+
+test("scanSecurity ignores common placeholders and non-secret values", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, ".env", [
+    "JWT_SECRET=secret",
+    "API_KEY=placeholder",
+    "SMTP_PASSWORD=short # comment should not make this suspicious",
+    "TOKEN_URL=https://example.com/token",
+    "CERT_PRIVATE_KEY=/etc/certs/private.key",
+    ""
+  ].join("\n"));
+
+  writeFile(rootDir, "src/placeholders.js", [
+    "const password = \"password\";",
+    "const jwtSecret = \"process.env.JWT_SECRET\";",
+    "const secretPath = \"/etc/secrets/app\";",
+    "const tokenUrl = \"https://example.com/token\";",
+    "const passwordField = \"varchar\";",
+    ""
+  ].join("\n"));
+
+  const issues = scanSecurity(rootDir);
+
+  assert.deepEqual(issues, []);
+});

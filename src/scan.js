@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const parser = require("@babel/parser");
 const traverse = require("@babel/traverse").default;
-const { isEmptyEnvValue, parseEnv } = require("./writer");
+const { isEmptyEnvValue, parseEnv, parseEnvLine } = require("./writer");
 
 const SECURITY_SOURCE_EXTENSIONS = new Set([
   ".js",
@@ -387,11 +387,12 @@ function detectSecret(line, isEnvFile) {
 }
 
 function detectEnvSecret(line) {
-  const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY)[A-Za-z0-9_]*)\s*=\s*(.+)\s*$/i);
+  const parsed = parseEnvLine(line);
 
-  if (!match) return null;
+  if (!parsed) return null;
+  if (!isSensitiveKey(parsed.key)) return null;
 
-  const value = match[2].trim();
+  const value = parsed.value.trim();
   if (!isSuspiciousEnvSecretValue(value)) return null;
 
   return {
@@ -402,10 +403,13 @@ function detectEnvSecret(line) {
 
 function detectSourceSecret(line) {
   const match = line.match(
-    /(?:^|[,{(]\s*|(?:const|let|var|private|public|protected|static|readonly)\s+)([A-Za-z_][A-Za-z0-9_]*(?:password|secret|token|apikey|api_key|private_key)[A-Za-z0-9_]*)\s*[:=]\s*(["'`])([^"'`]+)\2/i
+    /(?:^|(?:const|let|var|private|public|protected|static|readonly)\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(["'`])([^"'`]+)\2/i
+  ) || line.match(
+    /(?:^|[,{(]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(["'`])([^"'`]+)\2/i
   );
 
   if (!match) return null;
+  if (!isSensitiveKey(match[1])) return null;
 
   const value = match[3].trim();
   if (!isSuspiciousSourceSecretValue(value)) return null;
@@ -414,6 +418,10 @@ function detectSourceSecret(line) {
     type: "hardcoded-secret",
     message: "Hardcoded secret-looking value found. Move this value to an environment variable."
   };
+}
+
+function isSensitiveKey(key) {
+  return /(?:PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY)/i.test(key);
 }
 
 function isSuspiciousEnvSecretValue(value) {
@@ -461,7 +469,17 @@ function isSafePlaceholder(value) {
     "field",
     "header",
     "consumption",
-    "duration"
+    "duration",
+    "password",
+    "secret",
+    "token",
+    "apikey",
+    "api_key",
+    "private_key",
+    "example",
+    "sample",
+    "placeholder",
+    "changeme"
   ]);
 
   return safeValues.has(value);
