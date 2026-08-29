@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const parser = require("@babel/parser");
 const traverse = require("@babel/traverse").default;
-const { parseEnv } = require("./writer");
+const { isEmptyEnvValue, parseEnv } = require("./writer");
 
 const SECURITY_SOURCE_EXTENSIONS = new Set([
   ".js",
@@ -204,7 +204,7 @@ function scanProject(rootDir) {
     parsed.vars.forEach((entry, key) => {
       envFileVars.add(key);
 
-      if (!entry.value || entry.value.trim() === "") {
+      if (isEmptyEnvValue(entry.value)) {
         emptyVars.add(key);
       }
     });

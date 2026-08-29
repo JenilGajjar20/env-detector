@@ -56,6 +56,19 @@ test("default command creates .env with missing variables", () => {
   ].join("\n"));
 });
 
+test("default command warns when files cannot be parsed without changing success exit", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, "src/valid.js", "process.env.DB_HOST;\n");
+  writeFile(rootDir, "src/invalid.js", "const broken = ;\n");
+
+  const result = runCli(rootDir);
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /Warning: 1 file\(s\) could not be parsed\./);
+  assert.match(result.stdout, /Run env-detector --compare for details\./);
+});
+
 test("--compare reports used, missing, empty, and unused variables without writing", () => {
   const rootDir = createFixture();
 
@@ -87,6 +100,20 @@ test("--check fails on missing variables but ignores unused variables", () => {
   assert.match(result.stdout, /Unused variables are reported by --compare/);
 });
 
+test("--check warns on parse errors without changing pass exit", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, "src/valid.js", "process.env.DB_HOST;\n");
+  writeFile(rootDir, "src/invalid.js", "const broken = ;\n");
+  writeFile(rootDir, ".env", "DB_HOST=localhost\n");
+
+  const result = runCli(rootDir, ["--check"]);
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /OK: ENV check passed/);
+  assert.match(result.stdout, /Warning: 1 file\(s\) could not be parsed\./);
+});
+
 test("--strict fails on missing and unused variables", () => {
   const rootDir = createFixture();
 
@@ -99,6 +126,20 @@ test("--strict fails on missing and unused variables", () => {
   assert.match(result.stdout, /ERROR: strict mode failed/);
   assert.match(result.stdout, /Missing \(1\):/);
   assert.match(result.stdout, /Unused \(1\):/);
+});
+
+test("--strict warns on parse errors without changing pass exit", () => {
+  const rootDir = createFixture();
+
+  writeFile(rootDir, "src/valid.js", "process.env.DB_HOST;\n");
+  writeFile(rootDir, "src/invalid.js", "const broken = ;\n");
+  writeFile(rootDir, ".env", "DB_HOST=localhost\n");
+
+  const result = runCli(rootDir, ["--strict"]);
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /OK: strict mode passed/);
+  assert.match(result.stdout, /Warning: 1 file\(s\) could not be parsed\./);
 });
 
 test("--security reports hardcoded source secrets and unignored .env secrets", () => {

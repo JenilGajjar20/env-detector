@@ -6,6 +6,8 @@ const test = require("node:test");
 const {
   appendMissingVars,
   importFromBackup,
+  isEmptyEnvValue,
+  normalizeEnvValue,
   parseEnv,
   removeEnvVars,
   updateEnvValues
@@ -37,6 +39,42 @@ test("parseEnv reads keys while ignoring comments and blank lines", () => {
   assert.equal(parsed.vars.get("PORT").value, "3000");
   assert.equal(parsed.vars.get("JWT_SECRET").value, "");
   assert.equal(parsed.vars.has("# comment"), false);
+});
+
+test("parseEnv strips inline comments from unquoted values", () => {
+  const parsed = parseEnv([
+    "PLAIN=value # comment",
+    "EMPTY= # comment",
+    "HASH_VALUE=value#not-comment",
+    "QUOTED=\"value # not comment\" # comment",
+    "SINGLE='value # not comment' # comment",
+    ""
+  ].join("\n"));
+
+  assert.equal(parsed.vars.get("PLAIN").value, "value");
+  assert.equal(parsed.vars.get("EMPTY").value, "");
+  assert.equal(parsed.vars.get("HASH_VALUE").value, "value#not-comment");
+  assert.equal(parsed.vars.get("QUOTED").value, "\"value # not comment\"");
+  assert.equal(parsed.vars.get("SINGLE").value, "'value # not comment'");
+});
+
+test("normalizeEnvValue removes wrapping quotes for validation", () => {
+  assert.equal(normalizeEnvValue('""'), "");
+  assert.equal(normalizeEnvValue("''"), "");
+  assert.equal(normalizeEnvValue("'   '"), "");
+  assert.equal(normalizeEnvValue('"hello"'), "hello");
+  assert.equal(normalizeEnvValue("'hello world'"), "hello world");
+  assert.equal(normalizeEnvValue("plain-value"), "plain-value");
+});
+
+test("isEmptyEnvValue treats quoted blank values as empty", () => {
+  assert.equal(isEmptyEnvValue(""), true);
+  assert.equal(isEmptyEnvValue("   "), true);
+  assert.equal(isEmptyEnvValue('""'), true);
+  assert.equal(isEmptyEnvValue("''"), true);
+  assert.equal(isEmptyEnvValue("'   '"), true);
+  assert.equal(isEmptyEnvValue('"actual"'), false);
+  assert.equal(isEmptyEnvValue("' actual '"), false);
 });
 
 test("appendMissingVars appends only missing keys and preserves existing content", () => {
@@ -135,6 +173,29 @@ test("updateEnvValues updates existing keys and appends new keys", () => {
     "JWT_SECRET=secret-value",
     "",
     "NEW_KEY=new-value",
+    ""
+  ].join("\n"));
+});
+
+test("updateEnvValues preserves inline comments on updated lines", () => {
+  const rootDir = createFixture();
+
+  fs.writeFileSync(envPath(rootDir), [
+    "PORT=3000 # app port",
+    "JWT_SECRET= # required secret",
+    ""
+  ].join("\n"));
+
+  const result = updateEnvValues(envPath(rootDir), {
+    PORT: "4000",
+    JWT_SECRET: "secret-value"
+  });
+
+  assert.deepEqual(result.added, []);
+  assert.deepEqual(result.updated, ["PORT", "JWT_SECRET"]);
+  assert.equal(readEnv(rootDir), [
+    "PORT=4000 # app port",
+    "JWT_SECRET=secret-value # required secret",
     ""
   ].join("\n"));
 });

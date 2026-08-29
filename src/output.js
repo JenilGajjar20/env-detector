@@ -20,6 +20,7 @@ function printCheck(result) {
   if (!result.missing.length && !result.empty.length) {
     console.log("OK: ENV check passed");
     printSummary(result);
+    printParseErrorWarning(result);
     return;
   }
 
@@ -27,12 +28,14 @@ function printCheck(result) {
   printCategory("Missing", result.missing, result);
   printCategory("Empty", result.empty, result);
   console.log("\nUnused variables are reported by --compare and enforced by --strict.");
+  printParseErrorWarning(result);
 }
 
 function printStrict(result) {
   if (!result.missing.length && !result.empty.length && !result.unused.length) {
     console.log("OK: strict mode passed");
     printSummary(result);
+    printParseErrorWarning(result);
     return;
   }
 
@@ -42,6 +45,7 @@ function printStrict(result) {
   printCategory("Unused", result.unused, result);
   console.log("\nSummary:");
   printSummary(result);
+  printParseErrorWarning(result);
 }
 
 function printCategory(label, values, result) {
@@ -69,6 +73,14 @@ function printSummary(result) {
   console.log(`Missing: ${result.missing.length}`);
   console.log(`Empty: ${result.empty.length}`);
   console.log(`Unused: ${result.unused.length}`);
+}
+
+function printParseErrorWarning(result) {
+  if (!result.parseErrors?.length) return;
+
+  console.log("");
+  console.log(`Warning: ${result.parseErrors.length} file(s) could not be parsed.`);
+  console.log("Run env-detector --compare for details.");
 }
 
 function printSecurityIssues(issues, cwd) {
@@ -137,6 +149,7 @@ module.exports = {
   printCompare,
   printEnvBackupNotice,
   printHelp,
+  printParseErrorWarning,
   printSecurityIssues,
   printStrict,
   printSummary,

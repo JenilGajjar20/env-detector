@@ -10,6 +10,7 @@ const {
   printCompare,
   printEnvBackupNotice,
   printHelp,
+  printParseErrorWarning,
   printSecurityIssues,
   printStrict,
   printSummary,
@@ -102,6 +103,7 @@ if (!result.missing.length) {
   }
   console.log("No changes made.");
   printSummary(result);
+  printParseErrorWarning(result);
   process.exit(0);
 }
 
@@ -112,6 +114,7 @@ console.log(`Used: ${result.used.length}`);
 console.log(`Added: ${writeResult.added.length}`);
 console.log(`Empty: ${result.empty.length}`);
 console.log(`Unused: ${result.unused.length}`);
+printParseErrorWarning(result);
 
 if (writeResult.added.length) {
   console.log(`Updated: ${path.relative(cwd, envPath)}`);
