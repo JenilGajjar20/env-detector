@@ -6,8 +6,15 @@
   "bin": {
     "env-detector": "bin/env-scan.js"
   },
+  "files": [
+    "bin",
+    "src"
+  ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "pack:check": "npm pack --dry-run",
+    "release:check": "npm test && npm run pack:check",
+    "prepublishOnly": "npm run release:check"
   },
   "keywords": [
     "env",

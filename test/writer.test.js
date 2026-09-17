@@ -58,6 +58,19 @@ test("parseEnv strips inline comments from unquoted values", () => {
   assert.equal(parsed.vars.get("SINGLE").value, "'value # not comment'");
 });
 
+test("parseEnv handles CRLF content", () => {
+  const parsed = parseEnv([
+    "DB_HOST=localhost",
+    "EMPTY='' # required later",
+    "QUOTED=\"value # retained\" # comment",
+    ""
+  ].join("\r\n"));
+
+  assert.equal(parsed.vars.get("DB_HOST").value, "localhost");
+  assert.equal(parsed.vars.get("EMPTY").value, "''");
+  assert.equal(parsed.vars.get("QUOTED").value, '"value # retained"');
+});
+
 test("normalizeEnvValue removes wrapping quotes for validation", () => {
   assert.equal(normalizeEnvValue('""'), "");
   assert.equal(normalizeEnvValue("''"), "");
@@ -198,6 +211,32 @@ test("updateEnvValues preserves inline comments on updated lines", () => {
     "JWT_SECRET=secret-value # required secret",
     ""
   ].join("\n"));
+});
+
+test("writer operations preserve CRLF line endings", () => {
+  const rootDir = createFixture();
+  const filePath = envPath(rootDir);
+
+  fs.writeFileSync(filePath, [
+    "# app",
+    "PORT=3000 # app port",
+    "UNUSED=value",
+    ""
+  ].join("\r\n"));
+
+  updateEnvValues(filePath, { PORT: "4000" });
+  appendMissingVars(filePath, ["PORT", "JWT_SECRET"]);
+  removeEnvVars(filePath, ["UNUSED"]);
+
+  const content = readEnv(rootDir);
+  assert.equal(content, [
+    "# app",
+    "PORT=4000 # app port",
+    "",
+    "JWT_SECRET=",
+    ""
+  ].join("\r\n"));
+  assert.equal(content.replaceAll("\r\n", "").includes("\n"), false);
 });
 
 test("removeEnvVars removes selected keys while preserving comments and unrelated lines", () => {

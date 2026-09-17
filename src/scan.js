@@ -281,7 +281,7 @@ function scanSecurity(rootDir) {
             issues.push({
               file: full,
               line: index + 1,
-              snippet: line.trim(),
+              snippet: issue.snippet,
               type: issue.type,
               message: issue.message
             });
@@ -396,6 +396,7 @@ function detectEnvSecret(line) {
   if (!isSuspiciousEnvSecretValue(value)) return null;
 
   return {
+    snippet: `${parsed.key}=[REDACTED]`,
     type: "env-file-secret",
     message: "Sensitive value found in .env. Make sure this file is not committed."
   };
@@ -415,6 +416,7 @@ function detectSourceSecret(line) {
   if (!isSuspiciousSourceSecretValue(value)) return null;
 
   return {
+    snippet: `${match[1]}=${match[2]}[REDACTED]${match[2]}`,
     type: "hardcoded-secret",
     message: "Hardcoded secret-looking value found. Move this value to an environment variable."
   };

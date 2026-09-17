@@ -1,5 +1,7 @@
 # env-detector
 
+[![CI](https://github.com/JenilGajjar20/env-detector/actions/workflows/ci.yml/badge.svg)](https://github.com/JenilGajjar20/env-detector/actions/workflows/ci.yml)
+
 Smart environment variable analyzer and `.env` generator for Node.js projects.
 
 `env-detector` scans JavaScript and TypeScript source files for `process.env` usage, compares those variables with `.env`, and helps you generate, audit, or clean environment configuration safely.
@@ -74,8 +76,8 @@ These commands can update `.env`.
 | `env-detector` | | Append missing variables to `.env` |
 | `env-detector --ask` | `-a` | Prompt for missing or empty values |
 | `env-detector --fix` | `-f` | Interactively remove unused variables from `.env` |
-| `env-detector --from-backup` | | Import values from an auto-detected env backup file |
-| `env-detector --from-backup <path>` | | Copy the given backup file to `.env` |
+| `env-detector --from-backup` | | Selectively import used variables from one auto-detected backup |
+| `env-detector --from-backup <path>` | | Replace `.env` with an exact copy of the specified backup |
 
 ## Flag Details
 
@@ -129,14 +131,16 @@ This command preserves comments and unrelated lines while removing selected vari
 
 ### `--from-backup`
 
-Imports values from an existing env backup file into `.env`.
+Restores values from an existing env backup file. Its behavior depends on whether a path is provided.
 
 ```bash
 env-detector --from-backup
 env-detector --from-backup env-backup
 ```
 
-When no path is provided, it looks for one common backup file in the project root and imports values only for variables detected in source code:
+#### Auto-detected selective import
+
+When no path is provided, the command looks for exactly one common backup file in the project root and imports values only for variables detected in source code:
 
 - `env-backup`
 - `.env.backup`
@@ -157,13 +161,22 @@ Without an explicit path, this command:
 
 If multiple backup files exist, pass the intended file explicitly.
 
-When a path is provided, the backup file is copied directly to `.env`:
+#### Explicit full-file replacement
+
+When a relative or absolute path is provided, that file is copied directly to `.env`:
 
 ```bash
 env-detector --from-backup env-backup
 ```
 
-In this mode, `.env` becomes a full copy of the specified backup file.
+In this mode:
+
+- existing `.env` content is overwritten without a confirmation prompt
+- the backup is copied exactly, including all values, backup-only keys, comments, ordering, blank lines, and line endings
+- source usage is not used to filter or merge variables
+- secret values are copied even though they are not printed in the terminal
+
+Review the selected backup before running this command and make sure `.env` is ignored by Git.
 
 ### `--security`
 
@@ -187,7 +200,7 @@ If `.env` is not ignored by `.gitignore`, `--security` also warns about sensitiv
 
 If `.env` is already ignored with common patterns such as `.env`, `/.env`, `.env*`, or `.env.*`, those `.env` values are skipped to avoid noisy warnings.
 
-This command is read-only and reports potential issues with file and line numbers.
+This command is read-only and reports potential issues with file and line numbers. Sensitive values are shown as `[REDACTED]` so they are not exposed in terminal or CI logs.
 
 ## Grouped Config Support
 
@@ -228,3 +241,13 @@ DB_PASSWORD=
 - `.env` is parsed separately for variable comparison.
 - `--security` warns about `.env` values only when `.env` is not ignored by `.gitignore`.
 - The tool currently detects direct `process.env.KEY`, bracket access, destructuring from `process.env`, and simple fallback defaults such as `process.env.PORT || 3000`.
+
+## Release Validation
+
+Run the tests and inspect the npm package contents before creating a release:
+
+```bash
+npm run release:check
+```
+
+The same validation runs automatically before `npm publish` through the `prepublishOnly` script.
