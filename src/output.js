@@ -117,9 +117,9 @@ Write options:
   env-detector     Add missing variables to .env
   -a, --ask        Prompt for missing or empty values
   -f, --fix        Interactively remove unused variables from .env
-  --from-backup    Import values from an auto-detected env backup file
+  --from-backup    Selectively import used variables from one auto-detected backup
   --from-backup <path>
-                   Copy the given backup file to .env
+                   Replace .env with an exact copy of the specified backup
 
 Examples:
   env-detector --compare

@@ -45,6 +45,7 @@ function readEnvVars(envPath) {
 
 function appendMissingVars(envPath, keys, defaults = {}, grouped = {}) {
   const content = readEnvFile(envPath);
+  const lineEnding = detectLineEnding(content);
   const { vars } = parseEnv(content);
   const missingKeys = unique(keys).filter(key => !vars.has(key));
 
@@ -61,7 +62,7 @@ function appendMissingVars(envPath, keys, defaults = {}, grouped = {}) {
   const globalKeys = missingKeys.filter(key => !groupedKeys.has(key));
 
   if (globalKeys.length) {
-    chunks.push(formatSection(null, globalKeys, defaults));
+    chunks.push(formatSection(null, globalKeys, defaults, lineEnding));
   }
 
   const writtenKeys = new Set();
@@ -74,18 +75,18 @@ function appendMissingVars(envPath, keys, defaults = {}, grouped = {}) {
     sectionKeys.forEach(key => writtenKeys.add(key));
 
     if (sectionKeys.length) {
-      chunks.push(formatSection(group, sectionKeys, defaults));
+      chunks.push(formatSection(group, sectionKeys, defaults, lineEnding));
     }
   });
 
   let output = content;
   if (output && !output.endsWith("\n")) {
-    output += "\n";
+    output += lineEnding;
   }
   if (output.trim() && chunks.length) {
-    output += "\n";
+    output += lineEnding;
   }
-  output += chunks.join("\n\n") + "\n";
+  output += chunks.join(`${lineEnding}${lineEnding}`) + lineEnding;
 
   fs.writeFileSync(envPath, output);
   return { added: missingKeys };
@@ -143,6 +144,7 @@ function importFromBackup(envPath, backupPath, keys, defaults = {}, grouped = {}
 
 function updateEnvValues(envPath, values) {
   const content = readEnvFile(envPath);
+  const lineEnding = detectLineEnding(content);
   const parsed = parseEnv(content);
   const lines = content ? parsed.lines : [];
   const vars = parsed.vars;
@@ -162,7 +164,7 @@ function updateEnvValues(envPath, values) {
     }
   });
 
-  fs.writeFileSync(envPath, normalizeTrailingNewline(lines.join("\n")));
+  fs.writeFileSync(envPath, normalizeTrailingNewline(lines.join(lineEnding), lineEnding));
   return { added, updated };
 }
 
@@ -173,6 +175,7 @@ function removeEnvVars(envPath, keys) {
 
   const removeSet = new Set(keys);
   const content = readEnvFile(envPath);
+  const lineEnding = detectLineEnding(content);
   const lines = content.split(/\r?\n/);
   const removed = new Set();
 
@@ -186,7 +189,7 @@ function removeEnvVars(envPath, keys) {
     return false;
   });
 
-  fs.writeFileSync(envPath, normalizeTrailingNewline(keptLines.join("\n")));
+  fs.writeFileSync(envPath, normalizeTrailingNewline(keptLines.join(lineEnding), lineEnding));
   return { removed: Array.from(removed) };
 }
 
@@ -198,7 +201,7 @@ function replaceEnvLineValue(line, value) {
   return `${match[1]}${value}${comment}`;
 }
 
-function formatSection(name, keys, defaults) {
+function formatSection(name, keys, defaults, lineEnding = "\n") {
   const lines = [];
 
   if (name) {
@@ -209,11 +212,15 @@ function formatSection(name, keys, defaults) {
     lines.push(`${key}=${defaults[key] ?? ""}`);
   });
 
-  return lines.join("\n");
+  return lines.join(lineEnding);
 }
 
-function normalizeTrailingNewline(content) {
-  return content.endsWith("\n") ? content : `${content}\n`;
+function normalizeTrailingNewline(content, lineEnding = "\n") {
+  return content.endsWith("\n") ? content : `${content}${lineEnding}`;
+}
+
+function detectLineEnding(content) {
+  return content.includes("\r\n") ? "\r\n" : "\n";
 }
 
 function unique(values) {

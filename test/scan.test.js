@@ -237,6 +237,24 @@ test("scanSecurity reports representative env and source secrets", () => {
     "hardcoded-secret",
     "hardcoded-secret"
   ]);
+
+  assert.deepEqual(
+    issues.map(issue => issue.snippet),
+    [
+      "JWT_SECRET=[REDACTED]",
+      "API_KEY=[REDACTED]",
+      "dbPassword=\"[REDACTED]\"",
+      "privateToken=`[REDACTED]`",
+      "apiKey=\"[REDACTED]\""
+    ]
+  );
+
+  const serializedIssues = JSON.stringify(issues);
+  assert.doesNotMatch(serializedIssues, /prod-jwt-secret-value/);
+  assert.doesNotMatch(serializedIssues, /prod-api-key-value/);
+  assert.doesNotMatch(serializedIssues, /prod-db-password-value/);
+  assert.doesNotMatch(serializedIssues, /prod-private-token-value/);
+  assert.doesNotMatch(serializedIssues, /prod-source-api-key/);
 });
 
 test("scanSecurity ignores common placeholders and non-secret values", () => {

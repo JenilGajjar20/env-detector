@@ -152,8 +152,12 @@ test("--security reports hardcoded source secrets and unignored .env secrets", (
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Security issues found:/);
+  assert.match(result.stdout, /JWT_SECRET=\"\[REDACTED\]\"/);
+  assert.match(result.stdout, /SMTP_PASSWORD=\[REDACTED\]/);
   assert.match(result.stdout, /Hardcoded secret-looking value found/);
   assert.match(result.stdout, /Sensitive value found in \.env/);
+  assert.doesNotMatch(result.stdout, /hardcoded-secret/);
+  assert.doesNotMatch(result.stdout, /mail-password/);
 });
 
 test("--security skips .env values when .env is ignored", () => {
@@ -176,6 +180,16 @@ test("unknown flags fail and show help", () => {
   assert.equal(result.status, 1);
   assert.match(result.stdout, /Error: Unknown flag "--unknown"/);
   assert.match(result.stdout, /Usage: env-detector/);
+});
+
+test("--help explains both --from-backup modes", () => {
+  const rootDir = createFixture();
+
+  const result = runCli(rootDir, ["--help"]);
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /Selectively import used variables from one auto-detected backup/);
+  assert.match(result.stdout, /Replace \.env with an exact copy of the specified backup/);
 });
 
 test("--from-backup <path> copies the backup file directly to .env", () => {
